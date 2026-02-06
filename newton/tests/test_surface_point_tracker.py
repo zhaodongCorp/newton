@@ -21,7 +21,7 @@ import numpy as np
 import warp as wp
 
 import newton
-from newton._src.geometry.types import GeoType
+from newton.solvers import SolverSemiImplicit
 
 
 class TestTriangleCollection(unittest.TestCase):
@@ -333,6 +333,54 @@ class TestSave(unittest.TestCase):
         tracker = SurfacePointTracker(model, state, num_points=50)
         with self.assertRaises(ValueError):
             tracker.save("/tmp/empty.npz")
+
+
+class TestEndToEnd(unittest.TestCase):
+    """End-to-end test: build scene, simulate, track, save, verify."""
+
+    def test_falling_box(self):
+        """Track points on a box falling under gravity for 10 frames."""
+        builder = newton.ModelBuilder()
+        b = builder.add_body()
+        builder.add_shape_box(body=b, hx=0.5, hy=0.5, hz=0.5)
+        model = builder.finalize(device="cpu")
+        model.gravity = np.array([0.0, -9.81, 0.0])
+
+        state_0 = model.state()
+        state_1 = model.state()
+        control = model.control()
+        solver = SolverSemiImplicit(model)
+
+        from newton.utils import SurfacePointTracker
+
+        tracker = SurfacePointTracker(model, state_0, num_points=50, seed=42)
+        tracker.record(state_0)
+
+        dt = 1.0 / 60.0
+        num_frames = 10
+        for _ in range(num_frames):
+            state_0.clear_forces()
+            contacts = model.collide(state_0)
+            solver.step(state_0, state_1, control, contacts, dt)
+            tracker.record(state_1)
+            state_0, state_1 = state_1, state_0
+
+        with tempfile.NamedTemporaryFile(suffix=".npz", delete=False) as f:
+            path = f.name
+
+        try:
+            tracker.save(path)
+            data = np.load(path)
+            positions = data["positions"]
+
+            self.assertEqual(positions.shape, (50, num_frames + 1, 3))
+
+            # The box should be falling: y position at last frame < y position at first frame
+            mean_y_first = positions[:, 0, 1].mean()
+            mean_y_last = positions[:, -1, 1].mean()
+            self.assertLess(mean_y_last, mean_y_first)
+        finally:
+            os.unlink(path)
 
 
 if __name__ == "__main__":
