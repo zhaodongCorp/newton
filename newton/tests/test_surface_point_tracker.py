@@ -260,8 +260,10 @@ class TestRecord(unittest.TestCase):
         state1.body_q.assign(wp.array(body_q, dtype=wp.transform, device="cpu"))
         tracker.record(state1)
 
+        # All points should have shifted by (1, 0, 0)
         diff = tracker._frames[1] - tracker._frames[0]
-        np.testing.assert_allclose(diff, np.array([1.0, 0.0, 0.0]), atol=1e-5)
+        expected = np.broadcast_to(np.array([1.0, 0.0, 0.0]), diff.shape)
+        np.testing.assert_allclose(diff, expected, atol=1e-5)
 
     def test_record_deformable(self):
         """Points on deformable mesh update when particles move."""
@@ -344,7 +346,7 @@ class TestEndToEnd(unittest.TestCase):
         b = builder.add_body()
         builder.add_shape_box(body=b, hx=0.5, hy=0.5, hz=0.5)
         model = builder.finalize(device="cpu")
-        model.gravity = np.array([0.0, -9.81, 0.0])
+        model.set_gravity((0.0, -9.81, 0.0))
 
         state_0 = model.state()
         state_1 = model.state()
