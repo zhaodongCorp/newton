@@ -168,3 +168,13 @@ __all__ += [
     "load_texture",
     "normalize_texture",
 ]
+
+# ==================================================================================
+# surface point tracking
+# ==================================================================================
+
+from ._src.utils.surface_point_tracker import SurfacePointTracker  # noqa: E402
+
+__all__ += [
+    "SurfacePointTracker",
+]
