@@ -126,80 +126,168 @@ def create_axis_cameras(center, radius, num_worlds=1):
 
 
 def inject_trajectory_particles(sensor, trajectory_positions, frame_idx, trail_length=20):
-    """Inject trajectory points as renderable particles into the sensor.
+    """Inject current-frame trajectory points as renderable particle spheres.
 
-    For each tracked point, adds the current-frame position and up to
-    `trail_length` previous positions as small spheres. The render context's
-    particle arrays are replaced each frame.
+    Only the current-frame positions are rendered as 3D spheres. Trail lines
+    are drawn as 2D overlays in save_camera_frames() instead.
 
     Args:
         sensor: SensorTiledCamera instance.
         trajectory_positions: numpy array of shape (num_points, num_frames, 3).
         frame_idx: Current frame index into trajectory_positions.
-        trail_length: Number of trailing frames to show (default 20).
+        trail_length: Unused, kept for API compatibility.
     """
     import numpy as np  # noqa: PLC0415
     import warp as wp  # noqa: PLC0415
 
     num_points = trajectory_positions.shape[0]
-    start_frame = max(0, frame_idx - trail_length)
-    num_trail_frames = frame_idx - start_frame + 1  # includes current frame
 
-    # Gather positions for all trail frames
-    # Shape: (num_trail_frames, num_points, 3)
-    trail_positions = trajectory_positions[:, start_frame : frame_idx + 1, :]
-    # Reshape to (num_trail_frames * num_points, 3)
-    all_positions = trail_positions.reshape(-1, 3).astype(np.float32)
-
-    total_particles = all_positions.shape[0]
-
-    # Radii: current frame gets larger spheres, trail gets smaller
-    radii = np.full(total_particles, 0.005, dtype=np.float32)
-    # Last num_points entries are the current frame -- make them bigger
-    radii[-num_points:] = 0.01
-
-    # World index: all particles belong to world 0
-    world_idx = np.zeros(total_particles, dtype=np.int32)
+    # Only inject current-frame positions as spheres
+    current_positions = trajectory_positions[:, frame_idx, :].astype(np.float32)
+    radii = np.full(num_points, 0.008, dtype=np.float32)
+    world_idx = np.zeros(num_points, dtype=np.int32)
 
     device = sensor.render_context.device
-    sensor.render_context.particles_position = wp.array(all_positions, dtype=wp.vec3f, device=device)
+    sensor.render_context.particles_position = wp.array(current_positions, dtype=wp.vec3f, device=device)
     sensor.render_context.particles_radius = wp.array(radii, dtype=wp.float32, device=device)
     sensor.render_context.particles_world_index = wp.array(world_idx, dtype=wp.int32, device=device)
 
 
-def save_camera_frames(color_image, output_dir, frame_idx, num_cameras=6):
-    """Extract per-camera images from the rendered output and save as RGB JPG.
+def _generate_trajectory_colors(num_points, seed=42):
+    """Generate a random color (R, G, B) for each trajectory point."""
+    import numpy as np  # noqa: PLC0415
 
-    The color_image has shape (num_worlds, num_cameras, height, width) with
-    uint32 packed RGBA (R in low bits, A in high bits). We extract RGB
-    channels and save each camera view as a separate JPG file.
+    rng = np.random.RandomState(seed)
+    # Use HSV with full saturation and value for vivid colors
+    hues = rng.uniform(0.0, 1.0, num_points)
+    colors = []
+    for h in hues:
+        # HSV to RGB (S=0.9, V=1.0)
+        s, v = 0.9, 1.0
+        c = v * s
+        x = c * (1.0 - abs((h * 6.0) % 2.0 - 1.0))
+        m = v - c
+        if h < 1 / 6:
+            r, g, b = c, x, 0.0
+        elif h < 2 / 6:
+            r, g, b = x, c, 0.0
+        elif h < 3 / 6:
+            r, g, b = 0.0, c, x
+        elif h < 4 / 6:
+            r, g, b = 0.0, x, c
+        elif h < 5 / 6:
+            r, g, b = x, 0.0, c
+        else:
+            r, g, b = c, 0.0, x
+        colors.append((int((r + m) * 255), int((g + m) * 255), int((b + m) * 255)))
+    return colors
+
+
+def _project_points_to_2d(points_3d, cam_pos, cam_quat, fov_rad, resolution):
+    """Project 3D points into 2D pixel coordinates for a given camera.
+
+    Args:
+        points_3d: (N, 3) numpy array of world-space positions.
+        cam_pos: (3,) camera position.
+        cam_quat: (4,) camera quaternion (x, y, z, w).
+        fov_rad: Field of view in radians.
+        resolution: Image width/height in pixels.
+
+    Returns:
+        pixels: (N, 2) array of (x, y) pixel coordinates.
+        visible: (N,) boolean mask of points in front of camera.
+    """
+    import numpy as np  # noqa: PLC0415
+    import warp as wp  # noqa: PLC0415
+
+    q = wp.quatf(*cam_quat)
+    # Camera basis vectors
+    right = np.array([float(v) for v in wp.quat_rotate(q, wp.vec3f(1.0, 0.0, 0.0))])
+    up = np.array([float(v) for v in wp.quat_rotate(q, wp.vec3f(0.0, 1.0, 0.0))])
+    forward = np.array([float(v) for v in wp.quat_rotate(q, wp.vec3f(0.0, 0.0, -1.0))])
+
+    # Transform points to camera space
+    rel = points_3d - cam_pos  # (N, 3)
+    cam_x = rel @ right  # (N,)
+    cam_y = rel @ up
+    cam_z = rel @ forward  # positive = in front
+
+    # Perspective projection
+    half_size = np.tan(fov_rad / 2.0)
+    visible = cam_z > 0.01  # in front of camera
+    safe_z = np.where(visible, cam_z, 1.0)
+    ndc_x = cam_x / (safe_z * half_size)  # [-1, 1]
+    ndc_y = cam_y / (safe_z * half_size)
+
+    px = ((ndc_x + 1.0) * 0.5 * resolution).astype(np.int32)
+    py = ((1.0 - (ndc_y + 1.0) * 0.5) * resolution).astype(np.int32)  # flip Y
+
+    pixels = np.stack([px, py], axis=-1)
+    return pixels, visible
+
+
+def save_camera_frames(color_image, output_dir, frame_idx, num_cameras,
+                       trajectory_positions, trail_colors, camera_transforms_np,
+                       fov_rad, resolution, trail_length=20):
+    """Extract per-camera images, draw trail lines, and save as RGB JPG.
 
     Args:
         color_image: Warp array of shape (num_worlds, num_cameras, H, W), dtype uint32.
         output_dir: Base output directory.
         frame_idx: Frame number for filename.
-        num_cameras: Number of cameras (default 6).
+        num_cameras: Number of cameras.
+        trajectory_positions: (num_points, num_frames, 3) numpy array.
+        trail_colors: List of (R, G, B) tuples, one per trajectory point.
+        camera_transforms_np: (num_cameras, num_worlds, 7) numpy array of camera transforms.
+        fov_rad: Camera FOV in radians.
+        resolution: Image resolution (width = height).
+        trail_length: Number of trailing frames to draw.
     """
     import numpy as np  # noqa: PLC0415
-    from PIL import Image  # noqa: PLC0415
+    from PIL import Image, ImageDraw  # noqa: PLC0415
 
-    # Get numpy array: (num_worlds, num_cameras, H, W)
     color_np = color_image.numpy()
+    start_frame = max(0, frame_idx - trail_length + 1)
 
     for cam_idx in range(num_cameras):
-        # Extract single camera from world 0: (H, W) uint32
         pixel_data = color_np[0, cam_idx]
-
-        # Unpack RGBA from uint32: R=bits[0:7], G=bits[8:15], B=bits[16:23]
         r = ((pixel_data >> 0) & 0xFF).astype(np.uint8)
         g = ((pixel_data >> 8) & 0xFF).astype(np.uint8)
         b = ((pixel_data >> 16) & 0xFF).astype(np.uint8)
-        rgb = np.stack([r, g, b], axis=-1)  # (H, W, 3)
+        rgb = np.stack([r, g, b], axis=-1)
+
+        img = Image.fromarray(rgb, mode="RGB")
+        draw = ImageDraw.Draw(img)
+
+        cam_xform = camera_transforms_np[cam_idx, 0]
+        cam_pos = cam_xform[:3]
+        cam_quat = cam_xform[3:]
+
+        # Draw trail lines for each trajectory point
+        num_points = trajectory_positions.shape[0]
+        for pt_idx in range(num_points):
+            trail_frames = list(range(start_frame, frame_idx + 1))
+            if len(trail_frames) < 2:
+                continue
+            trail_3d = trajectory_positions[pt_idx, trail_frames, :]
+            pixels, visible = _project_points_to_2d(
+                trail_3d, cam_pos, cam_quat, fov_rad, resolution,
+            )
+            # Draw connected line segments where both endpoints are visible
+            color = trail_colors[pt_idx]
+            for i in range(len(trail_frames) - 1):
+                if visible[i] and visible[i + 1]:
+                    x0, y0 = int(pixels[i, 0]), int(pixels[i, 1])
+                    x1, y1 = int(pixels[i + 1, 0]), int(pixels[i + 1, 1])
+                    # Clip to image bounds
+                    if (0 <= x0 < resolution and 0 <= y0 < resolution and
+                            0 <= x1 < resolution and 0 <= y1 < resolution):
+                        draw.line([(x0, y0), (x1, y1)], fill=color, width=2)
 
         cam_dir = os.path.join(output_dir, f"cam_{cam_idx}")
         os.makedirs(cam_dir, exist_ok=True)
         filepath = os.path.join(cam_dir, f"frame_{frame_idx + 1:05d}.jpg")
-        Image.fromarray(rgb, mode="RGB").save(filepath, quality=95)
+        img.save(filepath, quality=95)
 
 
 def _assign_viewer_colors(sensor, model):
@@ -413,6 +501,10 @@ def run_renderer(example_name, module_path, num_frames, num_points, resolution, 
 
     os.makedirs(output_dir, exist_ok=True)
 
+    # Generate per-trajectory colors and get camera transforms as numpy
+    trail_colors = _generate_trajectory_colors(trajectory_positions.shape[0])
+    camera_transforms_np = camera_transforms.numpy()  # (6, num_worlds, 7)
+
     # Render each frame
     render_frames = min(num_frames, total_frames - 1)
     t0 = time.time()
@@ -450,8 +542,12 @@ def run_renderer(example_name, module_path, num_frames, num_points, resolution, 
             refit_bvh=True,
         )
 
-        # Save frames
-        save_camera_frames(color_image, output_dir, frame, num_cameras)
+        # Save frames with trail lines overlaid
+        save_camera_frames(
+            color_image, output_dir, frame, num_cameras,
+            trajectory_positions, trail_colors, camera_transforms_np,
+            fov_rad, resolution,
+        )
 
         if (frame + 1) % 10 == 0 or frame == render_frames - 1:
             elapsed = time.time() - t0
