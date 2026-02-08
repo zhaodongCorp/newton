@@ -78,6 +78,31 @@ def pick_example(example_map):
             print(f"  Unknown example: {choice}")
 
 
+def _get_example_num_worlds_default(mod):
+    """Extract --num-worlds default from an example module's argparse parser.
+
+    Some examples (e.g. basic_urdf) define the default num_worlds in their
+    argparse parser rather than as a constructor default. This function
+    parses the module source to read that default.
+    """
+    import ast  # noqa: PLC0415
+    import inspect  # noqa: PLC0415
+
+    try:
+        source = inspect.getsource(mod)
+        tree = ast.parse(source)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                for arg in node.args:
+                    if isinstance(arg, ast.Constant) and arg.value == "--num-worlds":
+                        for kw in node.keywords:
+                            if kw.arg == "default" and isinstance(kw.value, ast.Constant):
+                                return kw.value.value
+    except Exception:
+        pass
+    return 1
+
+
 def _create_example(mod, viewer, args):
     """Instantiate an Example, adapting to its constructor signature.
 
@@ -102,12 +127,15 @@ def _create_example(mod, viewer, args):
             if cli_val is not None:
                 kwargs["num_worlds"] = cli_val
             else:
-                # Use the example's own default if it has one
+                # Use the example's own constructor default if it has one
                 p = sig.parameters[name]
                 if p.default is not inspect.Parameter.empty:
                     kwargs["num_worlds"] = p.default
                 else:
-                    kwargs["num_worlds"] = 1
+                    # Some examples (e.g. basic_urdf) define --num-worlds in
+                    # their argparse parser rather than as a constructor default.
+                    # Try to extract that default.
+                    kwargs["num_worlds"] = _get_example_num_worlds_default(mod)
         elif name == "args":
             kwargs["args"] = args
         elif name == "headless":
