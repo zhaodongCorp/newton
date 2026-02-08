@@ -397,6 +397,72 @@ def _assign_viewer_colors(sensor, model):
     )
 
 
+def _compute_visibility(
+    depth_image,
+    trajectory_positions,
+    frame_idx,
+    num_cameras,
+    camera_transforms_np,
+    fov_rad,
+    resolution,
+    depth_tolerance,
+):
+    """Compute per-point visibility for each camera using the depth buffer.
+
+    For each camera, projects every trajectory point to 2D, reads the
+    rendered depth at that pixel, and compares with the actual point
+    distance to the camera. Points whose depth matches (within tolerance)
+    are marked visible.
+
+    Args:
+        depth_image: Warp array of shape (num_worlds, num_cameras, H, W), dtype float32.
+        trajectory_positions: (num_points, num_frames, 3) numpy array.
+        frame_idx: Current frame index into trajectory_positions.
+        num_cameras: Number of cameras.
+        camera_transforms_np: (num_cameras, num_worlds, 7) numpy array.
+        fov_rad: Camera FOV in radians.
+        resolution: Image width/height in pixels.
+        depth_tolerance: Maximum allowed depth difference to count as visible.
+
+    Returns:
+        visibility: (num_cameras, num_points) uint8 array with 0/1 values.
+    """
+    import numpy as np  # noqa: PLC0415
+
+    depth_np = depth_image.numpy()  # (num_worlds, num_cameras, H, W)
+    num_points = trajectory_positions.shape[0]
+    current_positions = trajectory_positions[:, frame_idx, :]  # (num_points, 3)
+    visibility = np.zeros((num_cameras, num_points), dtype=np.uint8)
+
+    for cam_idx in range(num_cameras):
+        cam_xform = camera_transforms_np[cam_idx, 0]
+        cam_pos = cam_xform[:3]
+        cam_quat = cam_xform[3:]
+
+        # Project points to 2D
+        pixels, in_front = _project_points_to_2d(current_positions, cam_pos, cam_quat, fov_rad, resolution)
+
+        # Actual distance from camera to each point
+        dists = np.linalg.norm(current_positions - cam_pos, axis=1)  # (num_points,)
+
+        cam_depth = depth_np[0, cam_idx]  # (H, W)
+
+        for pt in range(num_points):
+            if not in_front[pt]:
+                continue
+            px, py = int(pixels[pt, 0]), int(pixels[pt, 1])
+            if not (0 <= px < resolution and 0 <= py < resolution):
+                continue
+            rendered_depth = cam_depth[py, px]
+            if rendered_depth <= 0.0:
+                # No hit at this pixel (clear value)
+                continue
+            if abs(rendered_depth - dists[pt]) < depth_tolerance:
+                visibility[cam_idx, pt] = 1
+
+    return visibility
+
+
 def _compute_world_offsets(model, state):
     """Compute viewer-style world offsets for multi-world rendering.
 
@@ -738,6 +804,13 @@ def run_renderer(
         [fov_rad] * num_cameras,
     )
     color_image = sensor.create_color_image_output(resolution, resolution, num_cameras)
+    depth_image = sensor.create_depth_image_output(resolution, resolution, num_cameras)
+
+    # ClearData for depth-only pass: clear depth to 0 (no-hit sentinel)
+    depth_clear_data = ClearData(
+        clear_color=None,
+        clear_depth=wp.float32(0.0),
+    )
 
     os.makedirs(output_dir, exist_ok=True)
 
@@ -756,6 +829,10 @@ def run_renderer(
     render_frames = min(num_frames, total_frames - 1)
     t0 = time.time()
     print(f"\n  Rendering {render_frames} frames at {resolution}x{resolution} from {num_cameras} cameras...")
+
+    # Visibility tracking: (num_cameras, num_all_points, num_frames) uint8
+    depth_tolerance = max(radius * 0.01, 0.02)
+    visibility_all = np.zeros((num_cameras, num_all, render_frames), dtype=np.uint8)
 
     for frame in range(render_frames):
         if frame > 0:
@@ -789,10 +866,35 @@ def run_renderer(
         if model.num_worlds > 1 and offset_bq is not None:
             current_state.body_q = original_bq
 
+        # Depth-only render pass (no trajectory particles) for visibility.
+        # Particles are not yet injected, so the depth buffer reflects only
+        # scene geometry — trajectory spheres won't occlude each other.
+        sensor.render(
+            None,
+            camera_transforms,
+            camera_rays,
+            depth_image=depth_image,
+            refit_bvh=True,
+            clear_data=depth_clear_data,
+        )
+
+        # Compute per-point visibility against the depth buffer
+        vis = _compute_visibility(
+            depth_image,
+            trajectory_positions,
+            frame_idx=frame + 1,
+            num_cameras=num_cameras,
+            camera_transforms_np=camera_transforms_np,
+            fov_rad=fov_rad,
+            resolution=resolution,
+            depth_tolerance=depth_tolerance,
+        )
+        visibility_all[:, :, frame] = vis
+
         # Inject trajectory particles as renderable spheres
         inject_trajectory_particles(sensor, vis_positions, frame_idx=frame + 1)
 
-        # Render (state=None since we already updated above)
+        # Color render pass (with trajectory particles)
         sensor.render(
             None,
             camera_transforms,
@@ -821,6 +923,17 @@ def run_renderer(
 
     elapsed = time.time() - t0
     print(f"\nRendering complete in {elapsed:.1f}s")
+
+    # Save per-camera visibility files
+    for cam_idx in range(num_cameras):
+        vis_path = os.path.join(output_dir, f"cam_{cam_idx}_visibility.npz")
+        np.savez_compressed(vis_path, visibility=visibility_all[cam_idx])
+    total_visible = visibility_all.sum()
+    total_entries = visibility_all.size
+    pct_visible = 100.0 * total_visible / max(total_entries, 1)
+    print(f"\nVisibility: {pct_visible:.1f}% of point-frame-camera entries visible")
+    print(f"  Saved {num_cameras} files: cam_*_visibility.npz  shape=({num_all}, {render_frames})")
+    print(f"  Depth tolerance: {depth_tolerance:.4f}")
 
     # Summary
     total_files = 0
