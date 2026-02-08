@@ -425,11 +425,15 @@ def run_renderer(example_name, module_path, num_frames, num_points, resolution, 
 
         # Clear injected particles before update_from_state so that
         # has_particles returns False (avoids crash when state.particle_q
-        # is None for rigid-body-only scenes). Use the private attribute
-        # since the setter doesn't accept None when particles already exist.
+        # is None for rigid-body-only scenes). Also clear BVH bounds arrays
+        # since particle count changes each frame as the trail grows.
         rc = sensor.render_context
         rc._RenderContext__particles_position = None
         rc.bvh_particles = None
+        rc.bvh_particles_lowers = None
+        rc.bvh_particles_uppers = None
+        rc.bvh_particles_groups = None
+        rc.bvh_particles_group_roots = None
 
         # Update body/shape transforms from the simulation state
         sensor.update_from_state(current_state)
