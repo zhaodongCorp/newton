@@ -463,7 +463,17 @@ def pick_example(example_map):
             print(f"  Unknown example: {choice}")
 
 
-def run_renderer(example_name, module_path, num_frames, num_points, resolution, output_dir, trajectories_path, device):
+def run_renderer(
+    example_name,
+    module_path,
+    num_frames,
+    num_points,
+    resolution,
+    output_dir,
+    trajectories_path,
+    device,
+    num_worlds=None,
+):
     """Load example, run simulation with rendering, save JPG frames."""
     import importlib  # noqa: PLC0415
 
@@ -486,6 +496,7 @@ def run_renderer(example_name, module_path, num_frames, num_points, resolution, 
         headless=True,
         test=False,
         num_frames=num_frames,
+        num_worlds=num_worlds,
         collision_pipeline="standard",
         broad_phase_mode="nxn",
         output_path=None,
@@ -689,6 +700,7 @@ def main():
         output_dir=args.output_dir,
         trajectories_path=args.trajectories,
         device=args.device,
+        num_worlds=args.num_worlds,
     )
 
 

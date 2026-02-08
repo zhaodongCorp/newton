@@ -147,7 +147,7 @@ def _create_example(mod, viewer, args):
     return mod.Example(**kwargs)
 
 
-def run_tracker(example_name, module_path, num_frames, num_points, output_path, device):
+def run_tracker(example_name, module_path, num_frames, num_points, output_path, device, num_worlds=None):
     """Load an example, run it headlessly, track surface points, and save.
 
     This function:
@@ -180,6 +180,7 @@ def run_tracker(example_name, module_path, num_frames, num_points, output_path, 
         headless=True,
         test=False,
         num_frames=num_frames,
+        num_worlds=num_worlds,
         collision_pipeline="standard",
         broad_phase_mode="nxn",
         output_path=None,
@@ -299,6 +300,7 @@ def main():
         num_points=args.num_points,
         output_path=output_path,
         device=args.device,
+        num_worlds=args.num_worlds,
     )
 
 
