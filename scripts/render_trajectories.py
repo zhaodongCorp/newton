@@ -79,7 +79,13 @@ def compute_bounding_sphere(model, state):
 
 
 def create_axis_cameras(center, radius, num_worlds=1, distance_multiplier=1.5):
-    """Create 6 axis-aligned cameras on a sphere looking at center.
+    """Create 6 cameras positioned for scenes with a ground plane (Z-up).
+
+    Camera layout:
+        0-3: Four orbit cameras at 30 deg elevation, spaced 90 deg apart
+             (front, right, back, left).
+        4:   High overview at 60 deg elevation, azimuth 45 deg (front-right).
+        5:   Top-down view (90 deg elevation).
 
     Args:
         center: (3,) scene center.
@@ -95,21 +101,30 @@ def create_axis_cameras(center, radius, num_worlds=1, distance_multiplier=1.5):
     import warp as wp  # noqa: PLC0415
 
     R = distance_multiplier * radius
-    # 6 axis-aligned directions: +X, -X, +Y, -Y, +Z, -Z
-    directions = [
-        np.array([1.0, 0.0, 0.0]),
-        np.array([-1.0, 0.0, 0.0]),
-        np.array([0.0, 1.0, 0.0]),
-        np.array([0.0, -1.0, 0.0]),
-        np.array([0.0, 0.0, 1.0]),
-        np.array([0.0, 0.0, -1.0]),
+
+    # (azimuth_deg, elevation_deg) — azimuth measured from +X axis in XY plane
+    camera_angles = [
+        (0.0, 30.0),  # front
+        (90.0, 30.0),  # right
+        (180.0, 30.0),  # back
+        (270.0, 30.0),  # left
+        (45.0, 60.0),  # high overview (front-right)
+        (0.0, 90.0),  # top-down
     ]
 
     transforms = []
-    for d in directions:
+    for azimuth_deg, elev_deg in camera_angles:
+        az = np.radians(azimuth_deg)
+        el = np.radians(elev_deg)
+
+        # Spherical to Cartesian (Z-up)
+        cos_el = np.cos(el)
+        d = np.array([cos_el * np.cos(az), cos_el * np.sin(az), np.sin(el)])
         cam_pos = center + R * d
+
         # Look-at: camera -Z axis points from cam_pos toward center
         forward = -d  # normalized direction toward center
+
         # Choose an up vector that isn't parallel to forward
         if abs(np.dot(forward, np.array([0.0, 0.0, 1.0]))) < 0.99:
             world_up = np.array([0.0, 0.0, 1.0])
