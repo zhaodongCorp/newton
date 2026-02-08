@@ -202,6 +202,47 @@ def save_camera_frames(color_image, output_dir, frame_idx, num_cameras=6):
         Image.fromarray(rgb, mode="RGB").save(filepath, quality=95)
 
 
+def _assign_viewer_colors(sensor, model):
+    """Assign shape colors matching ViewerGL's Paul Tol Bright palette.
+
+    Replicates the color scheme from ViewerGL._shape_color_map() and the
+    dark gray + checkerboard appearance for ground planes.
+    """
+    import numpy as np  # noqa: PLC0415
+    import warp as wp  # noqa: PLC0415
+
+    import newton  # noqa: PLC0415
+
+    # Paul Tol Bright 9-color palette (same as ViewerGL._shape_color_map)
+    palette = [
+        [68, 119, 170],   # blue
+        [102, 204, 238],  # cyan
+        [34, 136, 51],    # green
+        [204, 187, 68],   # yellow
+        [238, 102, 119],  # red
+        [170, 51, 119],   # magenta
+        [187, 187, 187],  # grey
+        [238, 153, 51],   # orange
+        [0, 153, 136],    # teal
+    ]
+
+    num_shapes = model.shape_count
+    geo_types = model.shape_type.numpy()
+    colors = np.ones((num_shapes, 4), dtype=np.float32)
+
+    for s in range(num_shapes):
+        if int(geo_types[s]) == int(newton.GeoType.PLANE):
+            # Ground plane: dark gray (matches ViewerGL)
+            colors[s] = [0.125, 0.125, 0.15, 1.0]
+        else:
+            c = palette[s % len(palette)]
+            colors[s] = [c[0] / 255.0, c[1] / 255.0, c[2] / 255.0, 1.0]
+
+    sensor.render_context.shape_colors = wp.array(
+        colors, dtype=wp.vec4f, device=sensor.render_context.device,
+    )
+
+
 def _create_example(mod, viewer, args):
     """Instantiate an Example, adapting to its constructor signature.
 
@@ -355,10 +396,13 @@ def run_renderer(example_name, module_path, num_frames, num_points, resolution, 
         options=SensorTiledCamera.Options(
             default_light=True,
             default_light_shadows=True,
-            colors_per_shape=True,
+            checkerboard_texture=True,
             backface_culling=True,
         ),
     )
+
+    # Assign shape colors to match ViewerGL appearance (Paul Tol Bright palette)
+    _assign_viewer_colors(sensor, model)
     fov_rad = math.radians(60.0)
     camera_rays = sensor.compute_pinhole_camera_rays(
         resolution,
