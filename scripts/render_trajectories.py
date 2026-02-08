@@ -276,10 +276,10 @@ def save_camera_frames(
         # with a sky gradient: light blue at top -> white at bottom.
         is_bg = (r > 253.0) & (g > 253.0) & (b > 253.0)
 
-        # Build vertical gradient: row 0 = top (light blue), last row = bottom (white)
+        # Build vertical gradient: row 0 = top (light blue), last row = bottom (dark gray)
         h = pixel_data.shape[0]
         sky_top = np.array([135.0, 206.0, 250.0])  # light sky blue
-        sky_bot = np.array([255.0, 255.0, 255.0])  # white
+        sky_bot = np.array([55.0, 55.0, 55.0])  # dark gray
         t = np.linspace(0.0, 1.0, h, dtype=np.float32)[:, None]  # (H, 1)
         grad = sky_top * (1.0 - t) + sky_bot * t  # (H, 3)
         # Broadcast gradient to full image width
