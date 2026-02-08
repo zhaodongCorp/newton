@@ -50,7 +50,8 @@ def compute_bounding_sphere(model, state):
             body_pos = body_xform[:3]
             body_rot = body_xform[3:]
             # Transform shape position into world space
-            world_pos = body_pos + wp.quat_rotate(wp.quatf(*body_rot), wp.vec3f(*shape_pos)).numpy()
+            rotated = wp.quat_rotate(wp.quatf(*body_rot), wp.vec3f(*shape_pos))
+            world_pos = body_pos + np.array([float(rotated[0]), float(rotated[1]), float(rotated[2])])
         else:
             world_pos = shape_pos
 
@@ -164,3 +165,38 @@ def inject_trajectory_particles(sensor, trajectory_positions, frame_idx, trail_l
     sensor.render_context.particles_position = wp.array(all_positions, dtype=wp.vec3f, device=device)
     sensor.render_context.particles_radius = wp.array(radii, dtype=wp.float32, device=device)
     sensor.render_context.particles_world_index = wp.array(world_idx, dtype=wp.int32, device=device)
+
+
+def save_camera_frames(color_image, output_dir, frame_idx, num_cameras=6):
+    """Extract per-camera images from the rendered output and save as RGB JPG.
+
+    The color_image has shape (num_worlds, num_cameras, height, width) with
+    uint32 packed RGBA (R in low bits, A in high bits). We extract RGB
+    channels and save each camera view as a separate JPG file.
+
+    Args:
+        color_image: Warp array of shape (num_worlds, num_cameras, H, W), dtype uint32.
+        output_dir: Base output directory.
+        frame_idx: Frame number for filename.
+        num_cameras: Number of cameras (default 6).
+    """
+    import numpy as np  # noqa: PLC0415
+    from PIL import Image  # noqa: PLC0415
+
+    # Get numpy array: (num_worlds, num_cameras, H, W)
+    color_np = color_image.numpy()
+
+    for cam_idx in range(num_cameras):
+        # Extract single camera from world 0: (H, W) uint32
+        pixel_data = color_np[0, cam_idx]
+
+        # Unpack RGBA from uint32: R=bits[0:7], G=bits[8:15], B=bits[16:23]
+        r = ((pixel_data >> 0) & 0xFF).astype(np.uint8)
+        g = ((pixel_data >> 8) & 0xFF).astype(np.uint8)
+        b = ((pixel_data >> 16) & 0xFF).astype(np.uint8)
+        rgb = np.stack([r, g, b], axis=-1)  # (H, W, 3)
+
+        cam_dir = os.path.join(output_dir, f"cam_{cam_idx}")
+        os.makedirs(cam_dir, exist_ok=True)
+        filepath = os.path.join(cam_dir, f"frame_{frame_idx + 1:05d}.jpg")
+        Image.fromarray(rgb, mode="RGB").save(filepath, quality=95)
