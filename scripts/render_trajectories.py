@@ -268,10 +268,21 @@ def save_camera_frames(
 
     for cam_idx in range(num_cameras):
         pixel_data = color_np[0, cam_idx]
-        r = ((pixel_data >> 0) & 0xFF).astype(np.uint8)
-        g = ((pixel_data >> 8) & 0xFF).astype(np.uint8)
-        b = ((pixel_data >> 16) & 0xFF).astype(np.uint8)
-        rgb = np.stack([r, g, b], axis=-1)
+        r = ((pixel_data >> 0) & 0xFF).astype(np.float32)
+        g = ((pixel_data >> 8) & 0xFF).astype(np.float32)
+        b = ((pixel_data >> 16) & 0xFF).astype(np.float32)
+
+        # Brighten non-background pixels to compensate for the ray tracer's
+        # lower ambient intensity (0.5) compared to ViewerGL (~1.0).
+        # Background pixels (sky) are left untouched.
+        bg_r, bg_g, bg_b = 68.0, 161.0, 255.0
+        is_bg = (np.abs(r - bg_r) < 2.0) & (np.abs(g - bg_g) < 2.0) & (np.abs(b - bg_b) < 2.0)
+        brightness = 1.5
+        r = np.where(is_bg, r, np.minimum(r * brightness, 255.0))
+        g = np.where(is_bg, g, np.minimum(g * brightness, 255.0))
+        b = np.where(is_bg, b, np.minimum(b * brightness, 255.0))
+
+        rgb = np.stack([r.astype(np.uint8), g.astype(np.uint8), b.astype(np.uint8)], axis=-1)
 
         img = Image.fromarray(rgb, mode="RGB")
         draw = ImageDraw.Draw(img)
@@ -646,12 +657,31 @@ def run_renderer(
     sensor = SensorTiledCamera(
         model=model,
         options=SensorTiledCamera.Options(
-            default_light=True,
+            default_light=False,  # We create a custom light below
             default_light_shadows=True,
             checkerboard_texture=True,
             backface_culling=True,
         ),
     )
+
+    # Create a directional light matching ViewerGL's sun direction.
+    # ViewerGL uses (0.2, -0.3, 0.8) normalized; the ray tracer default
+    # (-0.577, 0.577, -0.577) produces darker results.
+    sun_dir = np.array([0.2, -0.3, 0.8], dtype=np.float32)
+    sun_dir /= np.linalg.norm(sun_dir)
+    sensor.render_context.utils.create_default_light(
+        enable_shadows=True,
+        direction=wp.vec3f(float(sun_dir[0]), float(sun_dir[1]), float(sun_dir[2])),
+    )
+
+    # Set background clear color to match ViewerGL's sky blue.
+    # ViewerGL: sky_upper = (68/255, 161/255, 255/255).
+    # Pack as 0xAABBGGRR (uint32 little-endian) for the ray tracer.
+    from newton._src.sensors.warp_raytrace import ClearData  # noqa: PLC0415
+
+    sky_r, sky_g, sky_b = 68, 161, 255
+    sky_clear_color = sky_r | (sky_g << 8) | (sky_b << 16) | (0xFF << 24)
+    clear_data = ClearData(clear_color=wp.int32(sky_clear_color))
 
     # Move all shapes into the global world so that world 0's camera sees
     # every robot, not just world 0's.  SensorTiledCamera renders per-world;
@@ -739,6 +769,7 @@ def run_renderer(
             camera_rays,
             color_image=color_image,
             refit_bvh=True,
+            clear_data=clear_data,
         )
 
         # Save frames with trail lines overlaid
