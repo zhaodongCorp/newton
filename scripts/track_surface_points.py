@@ -78,41 +78,12 @@ def pick_example(example_map):
             print(f"  Unknown example: {choice}")
 
 
-def _get_example_num_worlds_default(mod):
-    """Extract --num-worlds default from an example module's argparse parser.
-
-    Some examples (e.g. basic_urdf) define the default num_worlds in their
-    argparse parser rather than as a constructor default. This function
-    parses the module source to read that default.
-    """
-    import ast  # noqa: PLC0415
-    import inspect  # noqa: PLC0415
-
-    try:
-        source = inspect.getsource(mod)
-        tree = ast.parse(source)
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Call):
-                for arg in node.args:
-                    if isinstance(arg, ast.Constant) and arg.value == "--num-worlds":
-                        for kw in node.keywords:
-                            if kw.arg == "default" and isinstance(kw.value, ast.Constant):
-                                return kw.value.value
-    except Exception:
-        pass
-    return 1
-
-
 def _create_example(mod, viewer, args):
     """Instantiate an Example, adapting to its constructor signature.
 
     Newton examples have varying signatures: some take (viewer, args), others
     take (viewer, num_worlds, args), (viewer, num_worlds), (viewer,), etc.
     This helper inspects the constructor and passes matching arguments.
-
-    For num_worlds, if the user provided --num-worlds on the CLI we use that
-    value; otherwise we use the example's own default (from its constructor
-    signature) or fall back to 1.
     """
     import inspect  # noqa: PLC0415
 
@@ -123,19 +94,7 @@ def _create_example(mod, viewer, args):
         if name == "viewer":
             kwargs["viewer"] = viewer
         elif name == "num_worlds":
-            cli_val = getattr(args, "num_worlds", None)
-            if cli_val is not None:
-                kwargs["num_worlds"] = cli_val
-            else:
-                # Use the example's own constructor default if it has one
-                p = sig.parameters[name]
-                if p.default is not inspect.Parameter.empty:
-                    kwargs["num_worlds"] = p.default
-                else:
-                    # Some examples (e.g. basic_urdf) define --num-worlds in
-                    # their argparse parser rather than as a constructor default.
-                    # Try to extract that default.
-                    kwargs["num_worlds"] = _get_example_num_worlds_default(mod)
+            kwargs["num_worlds"] = getattr(args, "num_worlds", 1)
         elif name == "args":
             kwargs["args"] = args
         elif name == "headless":
@@ -267,7 +226,10 @@ def main():
     )
     parser.add_argument("--device", type=str, default=None, help="Warp device (e.g. cpu, cuda:0)")
     parser.add_argument(
-        "--num-worlds", type=int, default=None, help="Number of simulation worlds (default: example's own default)"
+        "--num-worlds",
+        type=int,
+        default=1,
+        help="Number of simulation worlds (default: 1; only world 0 is rendered)",
     )
     args = parser.parse_args()
 
