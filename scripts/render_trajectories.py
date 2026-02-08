@@ -122,3 +122,45 @@ def create_axis_cameras(center, radius, num_worlds=1):
         transforms.append([cam_xform] * num_worlds)
 
     return wp.array(transforms, dtype=wp.transformf)
+
+
+def inject_trajectory_particles(sensor, trajectory_positions, frame_idx, trail_length=20):
+    """Inject trajectory points as renderable particles into the sensor.
+
+    For each tracked point, adds the current-frame position and up to
+    `trail_length` previous positions as small spheres. The render context's
+    particle arrays are replaced each frame.
+
+    Args:
+        sensor: SensorTiledCamera instance.
+        trajectory_positions: numpy array of shape (num_points, num_frames, 3).
+        frame_idx: Current frame index into trajectory_positions.
+        trail_length: Number of trailing frames to show (default 20).
+    """
+    import numpy as np  # noqa: PLC0415
+    import warp as wp  # noqa: PLC0415
+
+    num_points = trajectory_positions.shape[0]
+    start_frame = max(0, frame_idx - trail_length)
+    num_trail_frames = frame_idx - start_frame + 1  # includes current frame
+
+    # Gather positions for all trail frames
+    # Shape: (num_trail_frames, num_points, 3)
+    trail_positions = trajectory_positions[:, start_frame : frame_idx + 1, :]
+    # Reshape to (num_trail_frames * num_points, 3)
+    all_positions = trail_positions.reshape(-1, 3).astype(np.float32)
+
+    total_particles = all_positions.shape[0]
+
+    # Radii: current frame gets larger spheres, trail gets smaller
+    radii = np.full(total_particles, 0.005, dtype=np.float32)
+    # Last num_points entries are the current frame -- make them bigger
+    radii[-num_points:] = 0.01
+
+    # World index: all particles belong to world 0
+    world_idx = np.zeros(total_particles, dtype=np.int32)
+
+    device = sensor.render_context.device
+    sensor.render_context.particles_position = wp.array(all_positions, dtype=wp.vec3f, device=device)
+    sensor.render_context.particles_radius = wp.array(radii, dtype=wp.float32, device=device)
+    sensor.render_context.particles_world_index = wp.array(world_idx, dtype=wp.int32, device=device)
