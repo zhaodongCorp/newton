@@ -75,3 +75,50 @@ def compute_bounding_sphere(model, state):
     # Ensure minimum radius
     radius = max(radius, 0.5)
     return center, radius
+
+
+def create_axis_cameras(center, radius, num_worlds=1):
+    """Create 6 axis-aligned cameras on a sphere of radius 1.5*R looking at center.
+
+    Returns a warp array of camera transforms with shape (6, num_worlds)
+    suitable for SensorTiledCamera.render().
+    """
+    import numpy as np  # noqa: PLC0415
+    import warp as wp  # noqa: PLC0415
+
+    R = 1.5 * radius
+    # 6 axis-aligned directions: +X, -X, +Y, -Y, +Z, -Z
+    directions = [
+        np.array([1.0, 0.0, 0.0]),
+        np.array([-1.0, 0.0, 0.0]),
+        np.array([0.0, 1.0, 0.0]),
+        np.array([0.0, -1.0, 0.0]),
+        np.array([0.0, 0.0, 1.0]),
+        np.array([0.0, 0.0, -1.0]),
+    ]
+
+    transforms = []
+    for d in directions:
+        cam_pos = center + R * d
+        # Look-at: camera -Z axis points from cam_pos toward center
+        forward = -d  # normalized direction toward center
+        # Choose an up vector that isn't parallel to forward
+        if abs(np.dot(forward, np.array([0.0, 0.0, 1.0]))) < 0.99:
+            world_up = np.array([0.0, 0.0, 1.0])
+        else:
+            world_up = np.array([0.0, 1.0, 0.0])
+
+        right = np.cross(forward, world_up)
+        right = right / np.linalg.norm(right)
+        up = np.cross(right, forward)
+        up = up / np.linalg.norm(up)
+
+        # Build rotation matrix (columns = right, up, -forward in camera convention)
+        # Camera convention: X=right, Y=up, Z=backward (looking along -Z)
+        rot_mat = np.column_stack([right, up, -forward])  # 3x3
+        quat = wp.quat_from_matrix(wp.mat33f(*rot_mat.flatten()))
+
+        cam_xform = wp.transformf(wp.vec3f(*cam_pos), quat)
+        transforms.append([cam_xform] * num_worlds)
+
+    return wp.array(transforms, dtype=wp.transformf)
