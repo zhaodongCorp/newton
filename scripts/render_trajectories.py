@@ -78,8 +78,15 @@ def compute_bounding_sphere(model, state):
     return center, radius
 
 
-def create_axis_cameras(center, radius, num_worlds=1):
-    """Create 6 axis-aligned cameras on a sphere of radius 1.5*R looking at center.
+def create_axis_cameras(center, radius, num_worlds=1, distance_multiplier=1.5):
+    """Create 6 axis-aligned cameras on a sphere looking at center.
+
+    Args:
+        center: (3,) scene center.
+        radius: Bounding sphere radius.
+        num_worlds: Number of simulation worlds.
+        distance_multiplier: Camera distance as a multiple of the bounding
+            sphere radius (default: 1.5).
 
     Returns a warp array of camera transforms with shape (6, num_worlds)
     suitable for SensorTiledCamera.render().
@@ -87,7 +94,7 @@ def create_axis_cameras(center, radius, num_worlds=1):
     import numpy as np  # noqa: PLC0415
     import warp as wp  # noqa: PLC0415
 
-    R = 1.5 * radius
+    R = distance_multiplier * radius
     # 6 axis-aligned directions: +X, -X, +Y, -Y, +Z, -Z
     directions = [
         np.array([1.0, 0.0, 0.0]),
@@ -523,6 +530,8 @@ def run_renderer(
     trajectories_path,
     device,
     num_worlds=None,
+    camera_distance=1.5,
+    traj_pct=10,
 ):
     """Load example, run simulation with rendering, save JPG frames."""
     import importlib  # noqa: PLC0415
@@ -629,7 +638,9 @@ def run_renderer(
         state.body_q = original_body_q
 
     num_cameras = 6
-    camera_transforms = create_axis_cameras(center, radius, num_worlds=model.num_worlds)
+    camera_transforms = create_axis_cameras(
+        center, radius, num_worlds=model.num_worlds, distance_multiplier=camera_distance
+    )
 
     # Set up sensor
     sensor = SensorTiledCamera(
@@ -670,9 +681,9 @@ def run_renderer(
 
     os.makedirs(output_dir, exist_ok=True)
 
-    # Subsample to 10% of trajectories for visualization
+    # Subsample trajectories for visualization
     num_all = trajectory_positions.shape[0]
-    num_vis = max(1, num_all // 10)
+    num_vis = max(1, int(num_all * traj_pct / 100.0))
     vis_indices = np.linspace(0, num_all - 1, num_vis, dtype=int)
     vis_positions = trajectory_positions[vis_indices]
     print(f"  Visualizing {num_vis}/{num_all} trajectories")
@@ -781,6 +792,18 @@ def main():
     parser.add_argument("--resolution", type=int, default=512, help="Image width and height in pixels (default: 512)")
     parser.add_argument("--device", type=str, default=None, help="Warp device (e.g. cpu, cuda:0)")
     parser.add_argument(
+        "--camera-distance",
+        type=float,
+        default=1.5,
+        help="Camera distance as a multiple of the bounding sphere radius (default: 1.5)",
+    )
+    parser.add_argument(
+        "--traj-pct",
+        type=float,
+        default=10,
+        help="Percentage of trajectory points to visualize (default: 10)",
+    )
+    parser.add_argument(
         "--num-worlds",
         type=int,
         default=None,
@@ -806,6 +829,8 @@ def main():
     print(f"  Output:        {args.output_dir}")
     print(f"  Trajectories:  {args.trajectories or '(generate on the fly)'}")
     print(f"  Device:        {args.device or 'default'}")
+    print(f"  Camera dist:   {args.camera_distance}x radius")
+    print(f"  Traj pct:      {args.traj_pct}%")
     print(f"  Num worlds:    {args.num_worlds or 'example default'}")
     print(f"{'=' * 50}")
 
@@ -819,6 +844,8 @@ def main():
         trajectories_path=args.trajectories,
         device=args.device,
         num_worlds=args.num_worlds,
+        camera_distance=args.camera_distance,
+        traj_pct=args.traj_pct,
     )
 
 
