@@ -501,8 +501,15 @@ def run_renderer(example_name, module_path, num_frames, num_points, resolution, 
 
     os.makedirs(output_dir, exist_ok=True)
 
+    # Subsample to 10% of trajectories for visualization
+    num_all = trajectory_positions.shape[0]
+    num_vis = max(1, num_all // 10)
+    vis_indices = np.linspace(0, num_all - 1, num_vis, dtype=int)
+    vis_positions = trajectory_positions[vis_indices]
+    print(f"  Visualizing {num_vis}/{num_all} trajectories")
+
     # Generate per-trajectory colors and get camera transforms as numpy
-    trail_colors = _generate_trajectory_colors(trajectory_positions.shape[0])
+    trail_colors = _generate_trajectory_colors(num_vis)
     camera_transforms_np = camera_transforms.numpy()  # (6, num_worlds, 7)
 
     # Render each frame
@@ -531,7 +538,7 @@ def run_renderer(example_name, module_path, num_frames, num_points, resolution, 
         sensor.update_from_state(current_state)
 
         # Inject trajectory particles as renderable spheres
-        inject_trajectory_particles(sensor, trajectory_positions, frame_idx=frame + 1)
+        inject_trajectory_particles(sensor, vis_positions, frame_idx=frame + 1)
 
         # Render (state=None since we already updated above)
         sensor.render(
@@ -545,7 +552,7 @@ def run_renderer(example_name, module_path, num_frames, num_points, resolution, 
         # Save frames with trail lines overlaid
         save_camera_frames(
             color_image, output_dir, frame, num_cameras,
-            trajectory_positions, trail_colors, camera_transforms_np,
+            vis_positions, trail_colors, camera_transforms_np,
             fov_rad, resolution,
         )
 
