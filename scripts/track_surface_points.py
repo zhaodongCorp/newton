@@ -84,6 +84,10 @@ def _create_example(mod, viewer, args):
     Newton examples have varying signatures: some take (viewer, args), others
     take (viewer, num_worlds, args), (viewer, num_worlds), (viewer,), etc.
     This helper inspects the constructor and passes matching arguments.
+
+    For num_worlds, if the user provided --num-worlds on the CLI we use that
+    value; otherwise we use the example's own default (from its constructor
+    signature) or fall back to 1.
     """
     import inspect  # noqa: PLC0415
 
@@ -94,7 +98,16 @@ def _create_example(mod, viewer, args):
         if name == "viewer":
             kwargs["viewer"] = viewer
         elif name == "num_worlds":
-            kwargs["num_worlds"] = getattr(args, "num_worlds", 1)
+            cli_val = getattr(args, "num_worlds", None)
+            if cli_val is not None:
+                kwargs["num_worlds"] = cli_val
+            else:
+                # Use the example's own default if it has one
+                p = sig.parameters[name]
+                if p.default is not inspect.Parameter.empty:
+                    kwargs["num_worlds"] = p.default
+                else:
+                    kwargs["num_worlds"] = 1
         elif name == "args":
             kwargs["args"] = args
         elif name == "headless":
@@ -224,6 +237,9 @@ def main():
         "--output", type=str, default=None, help="Output NPZ path (default: /tmp/<example>_trajectories.npz)"
     )
     parser.add_argument("--device", type=str, default=None, help="Warp device (e.g. cpu, cuda:0)")
+    parser.add_argument(
+        "--num-worlds", type=int, default=None, help="Number of simulation worlds (default: example's own default)"
+    )
     args = parser.parse_args()
 
     example_map = discover_examples()
@@ -245,6 +261,7 @@ def main():
     print(f"  Points:     {args.num_points}")
     print(f"  Output:     {output_path}")
     print(f"  Device:     {args.device or 'default'}")
+    print(f"  Num worlds: {args.num_worlds or 'example default'}")
     print(f"{'=' * 50}")
 
     run_tracker(

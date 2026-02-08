@@ -23,7 +23,6 @@ import warp as wp
 import newton
 from newton.solvers import SolverSemiImplicit
 
-
 # =============================================================================
 # Tests for _collect_triangles: verifying surface extraction from the model
 # =============================================================================

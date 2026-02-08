@@ -33,18 +33,18 @@ from newton._src.utils.mesh import (
 # on the is_rigid flag, avoiding the need for separate kernel dispatches.
 @wp.kernel
 def _update_point_positions(
-    is_rigid: wp.array(dtype=wp.int32),       # 1 = rigid body point, 0 = deformable
-    body_index: wp.array(dtype=wp.int32),      # index into body_q (-1 if ground-attached)
-    local_offset: wp.array(dtype=wp.vec3),     # body-local position (rigid points only)
-    bary_coords: wp.array(dtype=wp.vec3),      # barycentric coords (deformable points only)
-    tri_v0: wp.array(dtype=wp.int32),          # triangle vertex 0 index into particle_q
-    tri_v1: wp.array(dtype=wp.int32),          # triangle vertex 1 index into particle_q
-    tri_v2: wp.array(dtype=wp.int32),          # triangle vertex 2 index into particle_q
-    body_q: wp.array(dtype=wp.transform),      # current body transforms from state
-    particle_q: wp.array(dtype=wp.vec3),       # current particle positions from state
-    out_positions: wp.array(dtype=wp.vec3),     # output: world-space point positions
-    has_particles: wp.int32,                   # whether the state has particle data
-    has_bodies: wp.int32,                      # whether the state has body data
+    is_rigid: wp.array(dtype=wp.int32),  # 1 = rigid body point, 0 = deformable
+    body_index: wp.array(dtype=wp.int32),  # index into body_q (-1 if ground-attached)
+    local_offset: wp.array(dtype=wp.vec3),  # body-local position (rigid points only)
+    bary_coords: wp.array(dtype=wp.vec3),  # barycentric coords (deformable points only)
+    tri_v0: wp.array(dtype=wp.int32),  # triangle vertex 0 index into particle_q
+    tri_v1: wp.array(dtype=wp.int32),  # triangle vertex 1 index into particle_q
+    tri_v2: wp.array(dtype=wp.int32),  # triangle vertex 2 index into particle_q
+    body_q: wp.array(dtype=wp.transform),  # current body transforms from state
+    particle_q: wp.array(dtype=wp.vec3),  # current particle positions from state
+    out_positions: wp.array(dtype=wp.vec3),  # output: world-space point positions
+    has_particles: wp.int32,  # whether the state has particle data
+    has_bodies: wp.int32,  # whether the state has body data
 ):
     tid = wp.tid()
 
@@ -232,7 +232,7 @@ class SurfacePointTracker:
         # distribution for sampling. Larger triangles receive more sample points.
         all_areas = []
         surface_ids = []  # maps global triangle index -> surface index
-        tri_ids = []      # maps global triangle index -> local triangle index within surface
+        tri_ids = []  # maps global triangle index -> local triangle index within surface
 
         for surf_idx, surf in enumerate(surfaces):
             verts = surf["vertices"]
@@ -324,15 +324,18 @@ class SurfacePointTracker:
                 vertices = verts_8col[:, :3]
             elif geo_type == int(GeoType.CAPSULE):
                 radius, half_height = float(scale[0]), float(scale[1])
-                verts_8col, indices = create_capsule_mesh(radius=radius, half_height=half_height)
+                # up_axis=2 to match the ray tracer which renders capsules along Z
+                verts_8col, indices = create_capsule_mesh(radius=radius, half_height=half_height, up_axis=2)
                 vertices = verts_8col[:, :3]
             elif geo_type == int(GeoType.CYLINDER):
                 radius, half_height = float(scale[0]), float(scale[1])
-                verts_8col, indices = create_cylinder_mesh(radius=radius, half_height=half_height)
+                # up_axis=2 to match the ray tracer which renders cylinders along Z
+                verts_8col, indices = create_cylinder_mesh(radius=radius, half_height=half_height, up_axis=2)
                 vertices = verts_8col[:, :3]
             elif geo_type == int(GeoType.CONE):
                 radius, half_height = float(scale[0]), float(scale[1])
-                verts_8col, indices = create_cone_mesh(radius=radius, half_height=half_height)
+                # up_axis=2 to match the ray tracer which renders cones along Z
+                verts_8col, indices = create_cone_mesh(radius=radius, half_height=half_height, up_axis=2)
                 vertices = verts_8col[:, :3]
             elif geo_type == int(GeoType.MESH):
                 # Use the actual mesh data stored in the model

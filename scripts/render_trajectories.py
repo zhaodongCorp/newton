@@ -226,9 +226,18 @@ def _project_points_to_2d(points_3d, cam_pos, cam_quat, fov_rad, resolution):
     return pixels, visible
 
 
-def save_camera_frames(color_image, output_dir, frame_idx, num_cameras,
-                       trajectory_positions, trail_colors, camera_transforms_np,
-                       fov_rad, resolution, trail_length=20):
+def save_camera_frames(
+    color_image,
+    output_dir,
+    frame_idx,
+    num_cameras,
+    trajectory_positions,
+    trail_colors,
+    camera_transforms_np,
+    fov_rad,
+    resolution,
+    trail_length=20,
+):
     """Extract per-camera images, draw trail lines, and save as RGB JPG.
 
     Args:
@@ -271,7 +280,11 @@ def save_camera_frames(color_image, output_dir, frame_idx, num_cameras,
                 continue
             trail_3d = trajectory_positions[pt_idx, trail_frames, :]
             pixels, visible = _project_points_to_2d(
-                trail_3d, cam_pos, cam_quat, fov_rad, resolution,
+                trail_3d,
+                cam_pos,
+                cam_quat,
+                fov_rad,
+                resolution,
             )
             # Draw connected line segments where both endpoints are visible
             color = trail_colors[pt_idx]
@@ -280,8 +293,7 @@ def save_camera_frames(color_image, output_dir, frame_idx, num_cameras,
                     x0, y0 = int(pixels[i, 0]), int(pixels[i, 1])
                     x1, y1 = int(pixels[i + 1, 0]), int(pixels[i + 1, 1])
                     # Clip to image bounds
-                    if (0 <= x0 < resolution and 0 <= y0 < resolution and
-                            0 <= x1 < resolution and 0 <= y1 < resolution):
+                    if 0 <= x0 < resolution and 0 <= y0 < resolution and 0 <= x1 < resolution and 0 <= y1 < resolution:
                         draw.line([(x0, y0), (x1, y1)], fill=color, width=2)
 
         cam_dir = os.path.join(output_dir, f"cam_{cam_idx}")
@@ -303,15 +315,15 @@ def _assign_viewer_colors(sensor, model):
 
     # Paul Tol Bright 9-color palette (same as ViewerGL._shape_color_map)
     palette = [
-        [68, 119, 170],   # blue
+        [68, 119, 170],  # blue
         [102, 204, 238],  # cyan
-        [34, 136, 51],    # green
-        [204, 187, 68],   # yellow
+        [34, 136, 51],  # green
+        [204, 187, 68],  # yellow
         [238, 102, 119],  # red
-        [170, 51, 119],   # magenta
+        [170, 51, 119],  # magenta
         [187, 187, 187],  # grey
-        [238, 153, 51],   # orange
-        [0, 153, 136],    # teal
+        [238, 153, 51],  # orange
+        [0, 153, 136],  # teal
     ]
 
     num_shapes = model.shape_count
@@ -327,7 +339,9 @@ def _assign_viewer_colors(sensor, model):
             colors[s] = [c[0] / 255.0, c[1] / 255.0, c[2] / 255.0, 1.0]
 
     sensor.render_context.shape_colors = wp.array(
-        colors, dtype=wp.vec4f, device=sensor.render_context.device,
+        colors,
+        dtype=wp.vec4f,
+        device=sensor.render_context.device,
     )
 
 
@@ -337,6 +351,10 @@ def _create_example(mod, viewer, args):
     Newton examples have varying signatures: some take (viewer, args), others
     take (viewer, num_worlds, args), (viewer, num_worlds), (viewer,), etc.
     This helper inspects the constructor and passes matching arguments.
+
+    For num_worlds, if the user provided --num-worlds on the CLI we use that
+    value; otherwise we use the example's own default (from its constructor
+    signature) or fall back to 1.
     """
     import inspect  # noqa: PLC0415
 
@@ -347,7 +365,16 @@ def _create_example(mod, viewer, args):
         if name == "viewer":
             kwargs["viewer"] = viewer
         elif name == "num_worlds":
-            kwargs["num_worlds"] = getattr(args, "num_worlds", 1)
+            cli_val = getattr(args, "num_worlds", None)
+            if cli_val is not None:
+                kwargs["num_worlds"] = cli_val
+            else:
+                # Use the example's own default if it has one
+                p = sig.parameters[name]
+                if p.default is not inspect.Parameter.empty:
+                    kwargs["num_worlds"] = p.default
+                else:
+                    kwargs["num_worlds"] = 1
         elif name == "args":
             kwargs["args"] = args
         elif name == "headless":
@@ -457,7 +484,7 @@ def run_renderer(example_name, module_path, num_frames, num_points, resolution, 
         print(f"  Generating trajectories on the fly ({num_points} points)...")
         tracker = SurfacePointTracker(model, state, num_points=num_points, seed=42)
         tracker.record(state)
-        for frame in range(num_frames):
+        for _frame in range(num_frames):
             example.step()
             current_state = getattr(example, "state_0", state)
             tracker.record(current_state)
@@ -551,9 +578,15 @@ def run_renderer(example_name, module_path, num_frames, num_points, resolution, 
 
         # Save frames with trail lines overlaid
         save_camera_frames(
-            color_image, output_dir, frame, num_cameras,
-            vis_positions, trail_colors, camera_transforms_np,
-            fov_rad, resolution,
+            color_image,
+            output_dir,
+            frame,
+            num_cameras,
+            vis_positions,
+            trail_colors,
+            camera_transforms_np,
+            fov_rad,
+            resolution,
         )
 
         if (frame + 1) % 10 == 0 or frame == render_frames - 1:
@@ -593,6 +626,9 @@ def main():
     )
     parser.add_argument("--resolution", type=int, default=512, help="Image width and height in pixels (default: 512)")
     parser.add_argument("--device", type=str, default=None, help="Warp device (e.g. cpu, cuda:0)")
+    parser.add_argument(
+        "--num-worlds", type=int, default=None, help="Number of simulation worlds (default: example's own default)"
+    )
     args = parser.parse_args()
 
     example_map = discover_examples()
@@ -613,6 +649,7 @@ def main():
     print(f"  Output:        {args.output_dir}")
     print(f"  Trajectories:  {args.trajectories or '(generate on the fly)'}")
     print(f"  Device:        {args.device or 'default'}")
+    print(f"  Num worlds:    {args.num_worlds or 'example default'}")
     print(f"{'=' * 50}")
 
     run_renderer(
