@@ -642,6 +642,7 @@ def run_renderer(
     num_worlds=None,
     camera_distance=1.5,
     traj_pct=10,
+    depth_tol=None,
 ):
     """Load example, run simulation with rendering, save JPG frames."""
     import importlib  # noqa: PLC0415
@@ -831,7 +832,7 @@ def run_renderer(
     print(f"\n  Rendering {render_frames} frames at {resolution}x{resolution} from {num_cameras} cameras...")
 
     # Visibility tracking: (num_cameras, num_all_points, num_frames) uint8
-    depth_tolerance = max(radius * 0.01, 0.02)
+    depth_tolerance = depth_tol if depth_tol is not None else max(radius * 0.01, 0.02)
     visibility_all = np.zeros((num_cameras, num_all, render_frames), dtype=np.uint8)
 
     for frame in range(render_frames):
@@ -978,6 +979,12 @@ def main():
         help="Percentage of trajectory points to visualize (default: 10)",
     )
     parser.add_argument(
+        "--depth-tol",
+        type=float,
+        default=None,
+        help="Depth tolerance for visibility check (default: max(0.01*radius, 0.02))",
+    )
+    parser.add_argument(
         "--num-worlds",
         type=int,
         default=None,
@@ -1005,6 +1012,7 @@ def main():
     print(f"  Device:        {args.device or 'default'}")
     print(f"  Camera dist:   {args.camera_distance}x radius")
     print(f"  Traj pct:      {args.traj_pct}%")
+    print(f"  Depth tol:     {args.depth_tol or 'auto'}")
     print(f"  Num worlds:    {args.num_worlds or 'example default'}")
     print(f"{'=' * 50}")
 
@@ -1020,6 +1028,7 @@ def main():
         num_worlds=args.num_worlds,
         camera_distance=args.camera_distance,
         traj_pct=args.traj_pct,
+        depth_tol=args.depth_tol,
     )
 
 
