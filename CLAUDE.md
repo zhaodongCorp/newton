@@ -6,6 +6,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Newton is a GPU-accelerated physics simulation engine built on [NVIDIA Warp](https://github.com/NVIDIA/warp), targeting roboticists and simulation researchers. It extends Warp's deprecated `warp.sim` module and integrates [MuJoCo Warp](https://github.com/google-deepmind/mujoco_warp) as its primary backend. The project is in active beta; the API is unstable.
 
+## Network / Proxy
+
+This machine is an internal devserver that can only access the external network through a proxy. For any command that requires internet access (e.g. `git push`, `pip install`, `curl`), prefix it with `with-proxy` or `pp`:
+
+```bash
+with-proxy git push
+pp uv sync --extra examples
+```
+
 ## Common Commands
 
 ```bash
