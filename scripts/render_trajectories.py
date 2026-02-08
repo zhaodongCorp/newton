@@ -202,6 +202,34 @@ def save_camera_frames(color_image, output_dir, frame_idx, num_cameras=6):
         Image.fromarray(rgb, mode="RGB").save(filepath, quality=95)
 
 
+def _create_example(mod, viewer, args):
+    """Instantiate an Example, adapting to its constructor signature.
+
+    Newton examples have varying signatures: some take (viewer, args), others
+    take (viewer, num_worlds, args), (viewer, num_worlds), (viewer,), etc.
+    This helper inspects the constructor and passes matching arguments.
+    """
+    import inspect  # noqa: PLC0415
+
+    sig = inspect.signature(mod.Example.__init__)
+    params = list(sig.parameters.keys())  # includes 'self'
+    kwargs = {}
+    for name in params[1:]:  # skip 'self'
+        if name == "viewer":
+            kwargs["viewer"] = viewer
+        elif name == "num_worlds":
+            kwargs["num_worlds"] = getattr(args, "num_worlds", 1)
+        elif name == "args":
+            kwargs["args"] = args
+        elif name == "headless":
+            kwargs["headless"] = getattr(args, "headless", True)
+        elif name == "test_mode":
+            kwargs["test_mode"] = getattr(args, "test", False)
+        elif name == "verbose":
+            kwargs["verbose"] = False
+    return mod.Example(**kwargs)
+
+
 def discover_examples():
     """Discover available Newton examples (reused from track_surface_points.py)."""
     import newton.examples  # noqa: PLC0415
@@ -251,8 +279,7 @@ def pick_example(example_map):
             print(f"  Unknown example: {choice}")
 
 
-def run_renderer(example_name, module_path, num_frames, num_points, resolution,
-                 output_dir, trajectories_path, device):
+def run_renderer(example_name, module_path, num_frames, num_points, resolution, output_dir, trajectories_path, device):
     """Load example, run simulation with rendering, save JPG frames."""
     import importlib  # noqa: PLC0415
 
@@ -270,13 +297,19 @@ def run_renderer(example_name, module_path, num_frames, num_points, resolution,
     # Load example headlessly
     viewer = newton.viewer.ViewerNull(num_frames=num_frames)
     args = argparse.Namespace(
-        device=device, viewer="null", headless=True, test=False,
-        num_frames=num_frames, collision_pipeline="standard",
-        broad_phase_mode="nxn", output_path=None, rerun_address=None,
+        device=device,
+        viewer="null",
+        headless=True,
+        test=False,
+        num_frames=num_frames,
+        collision_pipeline="standard",
+        broad_phase_mode="nxn",
+        output_path=None,
+        rerun_address=None,
     )
     print(f"\nLoading example: {example_name} ({module_path})")
     mod = importlib.import_module(module_path)
-    example = mod.Example(viewer, args)
+    example = _create_example(mod, viewer, args)
 
     model = getattr(example, "model", None)
     state = getattr(example, "state_0", None)
@@ -302,7 +335,7 @@ def run_renderer(example_name, module_path, num_frames, num_points, resolution,
         trajectory_positions = np.stack(tracker._frames, axis=1)  # (num_points, num_frames+1, 3)
         # Reset example for the rendering pass (need fresh viewer since set_model is one-shot)
         viewer = newton.viewer.ViewerNull(num_frames=num_frames)
-        example = mod.Example(viewer, args)
+        example = _create_example(mod, viewer, args)
         model = example.model
         state = getattr(example, "state_0", state)
 
@@ -328,7 +361,9 @@ def run_renderer(example_name, module_path, num_frames, num_points, resolution,
     )
     fov_rad = math.radians(60.0)
     camera_rays = sensor.compute_pinhole_camera_rays(
-        resolution, resolution, [fov_rad] * num_cameras,
+        resolution,
+        resolution,
+        [fov_rad] * num_cameras,
     )
     color_image = sensor.create_color_image_output(resolution, resolution, num_cameras)
 
@@ -360,8 +395,11 @@ def run_renderer(example_name, module_path, num_frames, num_points, resolution,
 
         # Render (state=None since we already updated above)
         sensor.render(
-            None, camera_transforms, camera_rays,
-            color_image=color_image, refit_bvh=True,
+            None,
+            camera_transforms,
+            camera_rays,
+            color_image=color_image,
+            refit_bvh=True,
         )
 
         # Save frames
@@ -389,23 +427,21 @@ def run_renderer(example_name, module_path, num_frames, num_points, resolution,
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Render a Newton example with 6-camera trajectory visualization."
+    parser = argparse.ArgumentParser(description="Render a Newton example with 6-camera trajectory visualization.")
+    parser.add_argument("--example", type=str, default=None, help="Example name (interactive picker if omitted)")
+    parser.add_argument(
+        "--trajectories",
+        type=str,
+        default=None,
+        help="Path to NPZ from track_surface_points.py (generates on the fly if omitted)",
     )
-    parser.add_argument("--example", type=str, default=None,
-                        help="Example name (interactive picker if omitted)")
-    parser.add_argument("--trajectories", type=str, default=None,
-                        help="Path to NPZ from track_surface_points.py (generates on the fly if omitted)")
-    parser.add_argument("--output-dir", type=str, required=True,
-                        help="Directory to save rendered JPG frames")
-    parser.add_argument("--num-frames", type=int, default=60,
-                        help="Number of simulation frames (default: 60)")
-    parser.add_argument("--num-points", type=int, default=1000,
-                        help="Number of surface points if generating on the fly (default: 1000)")
-    parser.add_argument("--resolution", type=int, default=512,
-                        help="Image width and height in pixels (default: 512)")
-    parser.add_argument("--device", type=str, default=None,
-                        help="Warp device (e.g. cpu, cuda:0)")
+    parser.add_argument("--output-dir", type=str, required=True, help="Directory to save rendered JPG frames")
+    parser.add_argument("--num-frames", type=int, default=60, help="Number of simulation frames (default: 60)")
+    parser.add_argument(
+        "--num-points", type=int, default=1000, help="Number of surface points if generating on the fly (default: 1000)"
+    )
+    parser.add_argument("--resolution", type=int, default=512, help="Image width and height in pixels (default: 512)")
+    parser.add_argument("--device", type=str, default=None, help="Warp device (e.g. cpu, cuda:0)")
     args = parser.parse_args()
 
     example_map = discover_examples()

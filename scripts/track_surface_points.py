@@ -78,6 +78,34 @@ def pick_example(example_map):
             print(f"  Unknown example: {choice}")
 
 
+def _create_example(mod, viewer, args):
+    """Instantiate an Example, adapting to its constructor signature.
+
+    Newton examples have varying signatures: some take (viewer, args), others
+    take (viewer, num_worlds, args), (viewer, num_worlds), (viewer,), etc.
+    This helper inspects the constructor and passes matching arguments.
+    """
+    import inspect  # noqa: PLC0415
+
+    sig = inspect.signature(mod.Example.__init__)
+    params = list(sig.parameters.keys())  # includes 'self'
+    kwargs = {}
+    for name in params[1:]:  # skip 'self'
+        if name == "viewer":
+            kwargs["viewer"] = viewer
+        elif name == "num_worlds":
+            kwargs["num_worlds"] = getattr(args, "num_worlds", 1)
+        elif name == "args":
+            kwargs["args"] = args
+        elif name == "headless":
+            kwargs["headless"] = getattr(args, "headless", True)
+        elif name == "test_mode":
+            kwargs["test_mode"] = getattr(args, "test", False)
+        elif name == "verbose":
+            kwargs["verbose"] = False
+    return mod.Example(**kwargs)
+
+
 def run_tracker(example_name, module_path, num_frames, num_points, output_path, device):
     """Load an example, run it headlessly, track surface points, and save.
 
@@ -118,10 +146,10 @@ def run_tracker(example_name, module_path, num_frames, num_points, output_path, 
     )
 
     # Import and instantiate the example.
-    # Examples follow the Newton Example convention: Example(viewer, args)
+    # Examples have varying constructor signatures, so we inspect and adapt.
     print(f"\nLoading example: {example_name} ({module_path})")
     mod = importlib.import_module(module_path)
-    example = mod.Example(viewer, args)
+    example = _create_example(mod, viewer, args)
 
     # Access the model and initial state from the example.
     # By convention, examples expose these as public attributes.
@@ -134,8 +162,10 @@ def run_tracker(example_name, module_path, num_frames, num_points, output_path, 
         print("ERROR: Example does not expose 'state_0' attribute.")
         sys.exit(1)
 
-    print(f"  Bodies: {model.body_count}, Shapes: {model.shape_count}, "
-          f"Particles: {model.particle_count}, Triangles: {model.tri_count}")
+    print(
+        f"  Bodies: {model.body_count}, Shapes: {model.shape_count}, "
+        f"Particles: {model.particle_count}, Triangles: {model.tri_count}"
+    )
 
     # Create tracker
     try:
@@ -184,13 +214,15 @@ def run_tracker(example_name, module_path, num_frames, num_points, output_path, 
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Run a Newton example and save surface point trajectories."
-    )
+    parser = argparse.ArgumentParser(description="Run a Newton example and save surface point trajectories.")
     parser.add_argument("--example", type=str, default=None, help="Example name (interactive picker if omitted)")
     parser.add_argument("--num-frames", type=int, default=60, help="Number of simulation frames (default: 60)")
-    parser.add_argument("--num-points", type=int, default=1000, help="Number of surface points to track (default: 1000)")
-    parser.add_argument("--output", type=str, default=None, help="Output NPZ path (default: /tmp/<example>_trajectories.npz)")
+    parser.add_argument(
+        "--num-points", type=int, default=1000, help="Number of surface points to track (default: 1000)"
+    )
+    parser.add_argument(
+        "--output", type=str, default=None, help="Output NPZ path (default: /tmp/<example>_trajectories.npz)"
+    )
     parser.add_argument("--device", type=str, default=None, help="Warp device (e.g. cpu, cuda:0)")
     args = parser.parse_args()
 
