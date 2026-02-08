@@ -272,15 +272,32 @@ def save_camera_frames(
         g = ((pixel_data >> 8) & 0xFF).astype(np.float32)
         b = ((pixel_data >> 16) & 0xFF).astype(np.float32)
 
+        # Detect background pixels (white from clear_data) and replace
+        # with a sky gradient: light blue at top -> white at bottom.
+        is_bg = (r > 253.0) & (g > 253.0) & (b > 253.0)
+
+        # Build vertical gradient: row 0 = top (light blue), last row = bottom (white)
+        h = pixel_data.shape[0]
+        sky_top = np.array([135.0, 206.0, 250.0])  # light sky blue
+        sky_bot = np.array([255.0, 255.0, 255.0])  # white
+        t = np.linspace(0.0, 1.0, h, dtype=np.float32)[:, None]  # (H, 1)
+        grad = sky_top * (1.0 - t) + sky_bot * t  # (H, 3)
+        # Broadcast gradient to full image width
+        grad_r = np.broadcast_to(grad[:, 0:1], pixel_data.shape)
+        grad_g = np.broadcast_to(grad[:, 1:2], pixel_data.shape)
+        grad_b = np.broadcast_to(grad[:, 2:3], pixel_data.shape)
+
+        r = np.where(is_bg, grad_r, r)
+        g = np.where(is_bg, grad_g, g)
+        b = np.where(is_bg, grad_b, b)
+
         # Brighten non-background pixels to compensate for the ray tracer's
         # lower ambient intensity (0.5) compared to ViewerGL (~1.0).
-        # Background pixels (sky) are left untouched.
-        bg_r, bg_g, bg_b = 68.0, 161.0, 255.0
-        is_bg = (np.abs(r - bg_r) < 2.0) & (np.abs(g - bg_g) < 2.0) & (np.abs(b - bg_b) < 2.0)
         brightness = 1.5
-        r = np.where(is_bg, r, np.minimum(r * brightness, 255.0))
-        g = np.where(is_bg, g, np.minimum(g * brightness, 255.0))
-        b = np.where(is_bg, b, np.minimum(b * brightness, 255.0))
+        not_bg = ~is_bg
+        r = np.where(not_bg, np.minimum(r * brightness, 255.0), r)
+        g = np.where(not_bg, np.minimum(g * brightness, 255.0), g)
+        b = np.where(not_bg, np.minimum(b * brightness, 255.0), b)
 
         rgb = np.stack([r.astype(np.uint8), g.astype(np.uint8), b.astype(np.uint8)], axis=-1)
 
@@ -665,23 +682,20 @@ def run_renderer(
     )
 
     # Create a directional light matching ViewerGL's sun direction.
-    # ViewerGL uses (0.2, -0.3, 0.8) normalized; the ray tracer default
-    # (-0.577, 0.577, -0.577) produces darker results.
-    sun_dir = np.array([0.2, -0.3, 0.8], dtype=np.float32)
+    # ViewerGL sun_direction = (0.2, -0.3, 0.8) is the surface-to-light vector.
+    # The ray tracer's light orientation is light-to-surface (negated), so we
+    # negate ViewerGL's direction.
+    sun_dir = np.array([-0.2, 0.3, -0.8], dtype=np.float32)
     sun_dir /= np.linalg.norm(sun_dir)
     sensor.render_context.utils.create_default_light(
         enable_shadows=True,
         direction=wp.vec3f(float(sun_dir[0]), float(sun_dir[1]), float(sun_dir[2])),
     )
 
-    # Set background clear color to match ViewerGL's sky blue.
-    # ViewerGL: sky_upper = (68/255, 161/255, 255/255).
-    # Pack as 0xAABBGGRR (uint32 little-endian) for the ray tracer.
+    # Use a white clear color; we replace it with a sky gradient in post-processing.
     from newton._src.sensors.warp_raytrace import ClearData  # noqa: PLC0415
 
-    sky_r, sky_g, sky_b = 68, 161, 255
-    sky_clear_color = sky_r | (sky_g << 8) | (sky_b << 16) | (0xFF << 24)
-    clear_data = ClearData(clear_color=wp.int32(sky_clear_color))
+    clear_data = ClearData(clear_color=wp.int32(wp.uint32(0xFFFFFFFF)))
 
     # Move all shapes into the global world so that world 0's camera sees
     # every robot, not just world 0's.  SensorTiledCamera renders per-world;
