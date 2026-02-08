@@ -407,32 +407,22 @@ def _apply_world_offsets_to_body_q(state, model, world_offsets):
     return wp.array(body_q_np, dtype=wp.transformf, device=model.device)
 
 
-def _apply_world_offsets_to_trajectories(trajectory_positions, model, world_offsets):
-    """Apply per-world offsets to trajectory positions.
+def _apply_world_offsets_to_trajectories(trajectory_positions, point_world, world_offsets):
+    """Apply per-world offsets to trajectory positions using per-point world mapping.
 
-    Trajectory points are sampled in physics-space (no world offsets).
-    This shifts each point by its shape's world offset so they align
+    Each point is shifted by its world's offset so trajectories align
     with the offset-rendered geometry.
+
+    Args:
+        trajectory_positions: (num_points, num_frames, 3) numpy array.
+        point_world: (num_points,) int array mapping each point to its world index.
+        world_offsets: (num_worlds, 3) numpy array of per-world position offsets.
     """
-    num_worlds = model.num_worlds
-    if num_worlds <= 1:
-        return trajectory_positions
-
-    # Surface points are distributed across worlds proportional to shape
-    # count.  For replicated scenes every world has the same shapes, so
-    # points are evenly split.
-    num_points = trajectory_positions.shape[0]
-
-    # The tracker distributes points proportional to surface area across
-    # ALL shapes.  With replicate(), shapes are identical per world, so
-    # points are evenly distributed.  Divide points evenly across worlds.
-    points_per_world = num_points // num_worlds
     offset_positions = trajectory_positions.copy()
-    for w in range(num_worlds):
-        start = w * points_per_world
-        end = start + points_per_world if w < num_worlds - 1 else num_points
+    for i in range(len(point_world)):
+        w = int(point_world[i])
         if 0 <= w < len(world_offsets):
-            offset_positions[start:end] += world_offsets[w]
+            offset_positions[i] += world_offsets[w]
 
     return offset_positions
 
@@ -575,10 +565,18 @@ def run_renderer(
     print(f"  Bodies: {model.body_count}, Shapes: {model.shape_count}")
 
     # Load or generate trajectories
+    trajectories_pre_offset = False  # Whether trajectory positions already include world offsets
     if trajectories_path and os.path.exists(trajectories_path):
         print(f"  Loading trajectories from {trajectories_path}")
         traj_data = np.load(trajectories_path)
         trajectory_positions = traj_data["positions"]
+        # Trajectories saved by track_surface_points.py already have world
+        # offsets baked in (point_world is included for reference).
+        if "point_world" in traj_data:
+            trajectories_pre_offset = True
+            traj_point_world = traj_data["point_world"]
+        else:
+            traj_point_world = None
     else:
         print(f"  Generating trajectories on the fly ({num_points} points)...")
         tracker = SurfacePointTracker(model, state, num_points=num_points, seed=42)
@@ -588,6 +586,7 @@ def run_renderer(
             current_state = getattr(example, "state_0", state)
             tracker.record(current_state)
         trajectory_positions = np.stack(tracker._frames, axis=1)  # (num_points, num_frames+1, 3)
+        traj_point_world = tracker._point_world
         # Reset example for the rendering pass (need fresh viewer since set_model is one-shot)
         viewer = newton.viewer.ViewerNull(num_frames=num_frames)
         example = _create_example(mod, viewer, args)
@@ -605,11 +604,15 @@ def run_renderer(
         print(
             f"  World offsets: {model.num_worlds} worlds, spacing ~{np.linalg.norm(world_offsets[1] - world_offsets[0]):.1f}"
         )
-        trajectory_positions = _apply_world_offsets_to_trajectories(
-            trajectory_positions,
-            model,
-            world_offsets,
-        )
+        # Apply offsets to trajectory positions only if not already baked in.
+        # Pre-computed trajectories from track_surface_points.py have offsets
+        # applied at save time; on-the-fly trajectories need offsets here.
+        if not trajectories_pre_offset and traj_point_world is not None:
+            trajectory_positions = _apply_world_offsets_to_trajectories(
+                trajectory_positions,
+                traj_point_world,
+                world_offsets,
+            )
 
     # Apply offsets to a temporary state for bounding sphere computation
     offset_body_q = _apply_world_offsets_to_body_q(state, model, world_offsets)

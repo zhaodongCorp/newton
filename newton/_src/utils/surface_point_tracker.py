@@ -160,6 +160,17 @@ class SurfacePointTracker:
         self._tri_v1 = wp.array(tri_v1, dtype=wp.int32, device=self._device)
         self._tri_v2 = wp.array(tri_v2, dtype=wp.int32, device=self._device)
 
+        # Per-point world index, derived from body_world.
+        # Used to apply viewer-style world offsets for multi-world rendering.
+        body_world = model.body_world.numpy() if hasattr(model, "body_world") and model.body_world is not None else None
+        point_world = np.zeros(num_points, dtype=np.int32)
+        if body_world is not None:
+            for i in range(num_points):
+                b = body_index[i]
+                if b >= 0 and b < len(body_world):
+                    point_world[i] = body_world[b]
+        self._point_world = point_world
+
         # Reusable output buffer — overwritten each frame, then copied to CPU
         self._frame_positions = wp.zeros(num_points, dtype=wp.vec3, device=self._device)
 
@@ -204,7 +215,9 @@ class SurfacePointTracker:
     def save(self, path: str) -> None:
         """Save recorded trajectories to a compressed NPZ file.
 
-        The file contains a single array ``positions`` with shape ``(num_points, num_frames, 3)``.
+        The file contains:
+            - ``positions``: shape ``(num_points, num_frames, 3)`` -- trajectory positions.
+            - ``point_world``: shape ``(num_points,)`` -- world index for each point.
         """
         if not self._frames:
             raise ValueError("No frames recorded. Call record() at least once before save().")
@@ -215,7 +228,11 @@ class SurfacePointTracker:
         positions = np.transpose(stacked, (1, 0, 2))
 
         # Use compressed format to reduce file size (~3-6x smaller than uncompressed)
-        np.savez_compressed(path, positions=positions.astype(np.float32))
+        np.savez_compressed(
+            path,
+            positions=positions.astype(np.float32),
+            point_world=self._point_world,
+        )
 
     @staticmethod
     def _sample_points_on_surfaces(surfaces, num_points, seed=42):

@@ -205,6 +205,36 @@ def run_tracker(example_name, module_path, num_frames, num_points, output_path, 
     elapsed = time.time() - t0
     print(f"\nSimulation complete in {elapsed:.1f}s")
 
+    # Apply viewer-style world offsets so that multi-world trajectory
+    # positions are spread out in a grid matching ViewerGL layout.
+    # Physics body_q stores all worlds at overlapping local positions;
+    # without offsets, all robots' trajectories would overlap.
+    if model.num_worlds > 1:
+        from newton.utils import compute_world_offsets  # noqa: PLC0415
+
+        # Compute grid spacing (same logic as ViewerGL._auto_compute_world_offsets)
+        shape_radii = model.shape_collision_radius.numpy()
+        max_radius = 0.0
+        for s in range(model.shape_count):
+            r = float(shape_radii[s])
+            if r < 1.0e5:
+                max_radius = max(max_radius, r)
+        extent = max(max_radius * 2.0, 1.0)
+        spacing_val = float(np.ceil(extent * 1.5))
+        spacing = [spacing_val, spacing_val, spacing_val]
+        spacing[model.up_axis] = 0.0
+        world_offsets = compute_world_offsets(model.num_worlds, tuple(spacing), up_axis=model.up_axis)
+
+        # Apply per-point world offset using the tracker's point_world mapping
+        point_world = tracker._point_world
+        stacked = np.stack(tracker._frames, axis=0)  # (num_frames, num_points, 3)
+        for i in range(len(point_world)):
+            w = int(point_world[i])
+            if 0 <= w < len(world_offsets):
+                stacked[:, i, :] += world_offsets[w]
+        tracker._frames = [stacked[f] for f in range(stacked.shape[0])]
+        print(f"  Applied world offsets for {model.num_worlds} worlds (spacing ~{spacing_val:.1f})")
+
     # Save trajectories and report statistics
     tracker.save(output_path)
 

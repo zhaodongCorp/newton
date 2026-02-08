@@ -359,9 +359,12 @@ class TestSave(unittest.TestCase):
             tracker.save(path)
             data = np.load(path)
             self.assertIn("positions", data)
+            self.assertIn("point_world", data)
             # Shape should be (num_points, num_frames, 3)
             self.assertEqual(data["positions"].shape, (num_pts, 3, 3))
             self.assertEqual(data["positions"].dtype, np.float32)
+            # point_world should be (num_points,) with int32 world indices
+            self.assertEqual(data["point_world"].shape, (num_pts,))
         finally:
             os.unlink(path)
 
