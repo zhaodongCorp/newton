@@ -346,6 +346,97 @@ def _assign_viewer_colors(sensor, model):
     )
 
 
+def _compute_world_offsets(model, state):
+    """Compute viewer-style world offsets for multi-world rendering.
+
+    Newton's physics state (body_q) stores all worlds at the same local
+    positions.  ViewerGL spreads them in a 2D grid for visualization;
+    SensorTiledCamera does not.  This function replicates the viewer's
+    ``_auto_compute_world_offsets`` logic so we can apply the same offsets
+    when rendering with the ray tracer.
+
+    Returns an (num_worlds, 3) numpy array of per-world position offsets.
+    """
+    import numpy as np  # noqa: PLC0415
+
+    from newton.utils import compute_world_offsets  # noqa: PLC0415
+
+    num_worlds = model.num_worlds
+    if num_worlds <= 1:
+        return np.zeros((max(num_worlds, 1), 3), dtype=np.float32)
+
+    # Estimate per-world extents from collision radii (simplified version
+    # of ViewerBase._get_world_extents).
+    shape_radii = model.shape_collision_radius.numpy()
+    max_radius = 0.0
+    for s in range(model.shape_count):
+        r = float(shape_radii[s])
+        if r < 1.0e5:  # skip infinite planes
+            max_radius = max(max_radius, r)
+
+    extent = max(max_radius * 2.0, 1.0)
+    margin = 1.5
+    spacing_val = float(np.ceil(extent * margin))
+
+    # 2D grid perpendicular to up_axis (Z for Newton default)
+    spacing = [spacing_val, spacing_val, spacing_val]
+    spacing[model.up_axis] = 0.0
+
+    return compute_world_offsets(num_worlds, tuple(spacing), up_axis=model.up_axis)
+
+
+def _apply_world_offsets_to_body_q(state, model, world_offsets):
+    """Return a new body_q array with per-world position offsets applied.
+
+    Each body is shifted by its world's offset so that multi-world scenes
+    appear spread out in a grid, matching the ViewerGL layout.
+    """
+    import warp as wp  # noqa: PLC0415
+
+    if state.body_q is None:
+        return None
+
+    body_q_np = state.body_q.numpy().copy()  # (num_bodies, 7)
+    body_world = model.body_world.numpy()  # (num_bodies,)
+
+    for i in range(len(body_q_np)):
+        w = int(body_world[i])
+        if 0 <= w < len(world_offsets):
+            body_q_np[i, :3] += world_offsets[w]
+
+    return wp.array(body_q_np, dtype=wp.transformf, device=model.device)
+
+
+def _apply_world_offsets_to_trajectories(trajectory_positions, model, world_offsets):
+    """Apply per-world offsets to trajectory positions.
+
+    Trajectory points are sampled in physics-space (no world offsets).
+    This shifts each point by its shape's world offset so they align
+    with the offset-rendered geometry.
+    """
+    num_worlds = model.num_worlds
+    if num_worlds <= 1:
+        return trajectory_positions
+
+    # Surface points are distributed across worlds proportional to shape
+    # count.  For replicated scenes every world has the same shapes, so
+    # points are evenly split.
+    num_points = trajectory_positions.shape[0]
+
+    # The tracker distributes points proportional to surface area across
+    # ALL shapes.  With replicate(), shapes are identical per world, so
+    # points are evenly distributed.  Divide points evenly across worlds.
+    points_per_world = num_points // num_worlds
+    offset_positions = trajectory_positions.copy()
+    for w in range(num_worlds):
+        start = w * points_per_world
+        end = start + points_per_world if w < num_worlds - 1 else num_points
+        if 0 <= w < len(world_offsets):
+            offset_positions[start:end] += world_offsets[w]
+
+    return offset_positions
+
+
 def _create_example(mod, viewer, args):
     """Instantiate an Example, adapting to its constructor signature.
 
@@ -506,9 +597,33 @@ def run_renderer(
     total_frames = trajectory_positions.shape[1]
     print(f"  Trajectory: {trajectory_positions.shape[0]} points, {total_frames} frames")
 
+    # Compute viewer-style world offsets so multi-world scenes are spread
+    # out in a grid (matching ViewerGL layout). Physics body_q stores all
+    # worlds at the same local positions; we apply offsets for rendering.
+    world_offsets = _compute_world_offsets(model, state)
+    if model.num_worlds > 1:
+        print(
+            f"  World offsets: {model.num_worlds} worlds, spacing ~{np.linalg.norm(world_offsets[1] - world_offsets[0]):.1f}"
+        )
+        trajectory_positions = _apply_world_offsets_to_trajectories(
+            trajectory_positions,
+            model,
+            world_offsets,
+        )
+
+    # Apply offsets to a temporary state for bounding sphere computation
+    offset_body_q = _apply_world_offsets_to_body_q(state, model, world_offsets)
+    if offset_body_q is not None:
+        # Temporarily swap body_q for bounding sphere calculation
+        original_body_q = state.body_q
+        state.body_q = offset_body_q
+
     # Compute bounding sphere and cameras
     center, radius = compute_bounding_sphere(model, state)
     print(f"  Bounding sphere: center={center}, radius={radius:.3f}")
+
+    if offset_body_q is not None:
+        state.body_q = original_body_q
 
     num_cameras = 6
     camera_transforms = create_axis_cameras(center, radius, num_worlds=model.num_worlds)
@@ -585,8 +700,20 @@ def run_renderer(
         rc.bvh_particles_groups = None
         rc.bvh_particles_group_roots = None
 
+        # Apply world offsets to body transforms so multi-world robots
+        # appear spread out in a grid (matching ViewerGL layout).
+        if model.num_worlds > 1:
+            offset_bq = _apply_world_offsets_to_body_q(current_state, model, world_offsets)
+            if offset_bq is not None:
+                original_bq = current_state.body_q
+                current_state.body_q = offset_bq
+
         # Update body/shape transforms from the simulation state
         sensor.update_from_state(current_state)
+
+        # Restore original body_q so physics isn't affected
+        if model.num_worlds > 1 and offset_bq is not None:
+            current_state.body_q = original_bq
 
         # Inject trajectory particles as renderable spheres
         inject_trajectory_particles(sensor, vis_positions, frame_idx=frame + 1)
