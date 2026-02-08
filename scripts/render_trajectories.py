@@ -145,7 +145,8 @@ def inject_trajectory_particles(sensor, trajectory_positions, frame_idx, trail_l
     # Only inject current-frame positions as spheres
     current_positions = trajectory_positions[:, frame_idx, :].astype(np.float32)
     radii = np.full(num_points, 0.008, dtype=np.float32)
-    world_idx = np.zeros(num_points, dtype=np.int32)
+    # Use global world (-1) so particles are visible from any world tile
+    world_idx = np.full(num_points, -1, dtype=np.int32)
 
     device = sensor.render_context.device
     sensor.render_context.particles_position = wp.array(current_positions, dtype=wp.vec3f, device=device)
@@ -361,7 +362,16 @@ def _create_example(mod, viewer, args):
         if name == "viewer":
             kwargs["viewer"] = viewer
         elif name == "num_worlds":
-            kwargs["num_worlds"] = getattr(args, "num_worlds", 1)
+            cli_val = getattr(args, "num_worlds", None)
+            if cli_val is not None:
+                kwargs["num_worlds"] = cli_val
+            else:
+                # Use the example's own constructor default, or 1
+                p = sig.parameters[name]
+                if p.default is not inspect.Parameter.empty:
+                    kwargs["num_worlds"] = p.default
+                else:
+                    kwargs["num_worlds"] = 1
         elif name == "args":
             kwargs["args"] = args
         elif name == "headless":
@@ -514,6 +524,16 @@ def run_renderer(
         ),
     )
 
+    # Move all shapes into the global world so that world 0's camera sees
+    # every robot, not just world 0's.  SensorTiledCamera renders per-world;
+    # shapes with world_index=-1 are placed in the global world group, which
+    # is visible from every world tile.
+    if model.num_worlds > 1:
+        global_world = np.full(model.shape_count, -1, dtype=np.int32)
+        model.shape_world = wp.array(global_world, dtype=wp.int32, device=model.device)
+        # The render context holds a reference to model.shape_world, so the
+        # assignment above is picked up automatically during BVH rebuild.
+
     # Assign shape colors to match ViewerGL appearance (Paul Tol Bright palette)
     _assign_viewer_colors(sensor, model)
     fov_rad = math.radians(60.0)
@@ -627,8 +647,8 @@ def main():
     parser.add_argument(
         "--num-worlds",
         type=int,
-        default=1,
-        help="Number of simulation worlds (default: 1; only world 0 is rendered)",
+        default=None,
+        help="Number of simulation worlds (default: example's own default)",
     )
     args = parser.parse_args()
 

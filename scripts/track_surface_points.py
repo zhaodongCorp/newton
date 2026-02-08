@@ -94,7 +94,16 @@ def _create_example(mod, viewer, args):
         if name == "viewer":
             kwargs["viewer"] = viewer
         elif name == "num_worlds":
-            kwargs["num_worlds"] = getattr(args, "num_worlds", 1)
+            cli_val = getattr(args, "num_worlds", None)
+            if cli_val is not None:
+                kwargs["num_worlds"] = cli_val
+            else:
+                # Use the example's own constructor default, or 1
+                p = sig.parameters[name]
+                if p.default is not inspect.Parameter.empty:
+                    kwargs["num_worlds"] = p.default
+                else:
+                    kwargs["num_worlds"] = 1
         elif name == "args":
             kwargs["args"] = args
         elif name == "headless":
@@ -228,8 +237,8 @@ def main():
     parser.add_argument(
         "--num-worlds",
         type=int,
-        default=1,
-        help="Number of simulation worlds (default: 1; only world 0 is rendered)",
+        default=None,
+        help="Number of simulation worlds (default: example's own default)",
     )
     args = parser.parse_args()
 
