@@ -529,10 +529,16 @@ def run_renderer(
     # shapes with world_index=-1 are placed in the global world group, which
     # is visible from every world tile.
     if model.num_worlds > 1:
-        global_world = np.full(model.shape_count, -1, dtype=np.int32)
-        model.shape_world = wp.array(global_world, dtype=wp.int32, device=model.device)
-        # The render context holds a reference to model.shape_world, so the
-        # assignment above is picked up automatically during BVH rebuild.
+        global_world = wp.array(
+            np.full(model.shape_count, -1, dtype=np.int32),
+            dtype=wp.int32,
+            device=model.device,
+        )
+        # Update both model and render context — the render context copied
+        # the reference during __init__, so replacing the model attribute
+        # alone doesn't propagate.
+        model.shape_world = global_world
+        sensor.render_context.shape_world_index = global_world
 
     # Assign shape colors to match ViewerGL appearance (Paul Tol Bright palette)
     _assign_viewer_colors(sensor, model)
