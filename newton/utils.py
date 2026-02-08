@@ -171,6 +171,8 @@ __all__ += [
 
 # ==================================================================================
 # surface point tracking
+# Samples 3D points on mesh surfaces and tracks their world-space trajectories
+# during simulation. Supports both rigid body shapes and deformable meshes.
 # ==================================================================================
 
 from ._src.utils.surface_point_tracker import SurfacePointTracker  # noqa: E402

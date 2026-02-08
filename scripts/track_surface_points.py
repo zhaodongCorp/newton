@@ -17,7 +17,12 @@ import time
 
 
 def discover_examples():
-    """Discover available Newton examples, same logic as newton.examples.main()."""
+    """Discover available Newton examples, same logic as newton.examples.main().
+
+    Scans the example subdirectories for files matching the ``example_*.py``
+    naming convention and builds a mapping from short names (e.g. "basic_shapes")
+    to fully qualified module paths (e.g. "newton.examples.basic.example_basic_shapes").
+    """
     import newton.examples  # noqa: PLC0415
 
     src_dir = newton.examples.get_source_directory()
@@ -29,13 +34,17 @@ def discover_examples():
             continue
         for filename in sorted(os.listdir(module_dir)):
             if filename.startswith("example_") and filename.endswith(".py"):
-                name = filename[8:-3]  # strip "example_" and ".py"
+                name = filename[8:-3]  # strip "example_" prefix and ".py" suffix
                 example_map[name] = f"newton.examples.{module}.{filename[:-3]}"
     return example_map
 
 
 def pick_example(example_map):
-    """Interactive example picker."""
+    """Interactive example picker.
+
+    Presents a numbered list of available examples and accepts either the
+    number or name as input. Supports partial name matching for convenience.
+    """
     names = list(example_map.keys())
     print("\nAvailable Newton examples:")
     print("-" * 40)
@@ -70,7 +79,15 @@ def pick_example(example_map):
 
 
 def run_tracker(example_name, module_path, num_frames, num_points, output_path, device):
-    """Load an example, run it headlessly, track surface points, and save."""
+    """Load an example, run it headlessly, track surface points, and save.
+
+    This function:
+    1. Dynamically imports the specified Newton example module
+    2. Instantiates it with a headless (ViewerNull) viewer
+    3. Creates a SurfacePointTracker to sample points on the scene's meshes
+    4. Runs the simulation loop, recording point positions each frame
+    5. Saves the trajectory data to a compressed NPZ file
+    """
     import importlib  # noqa: PLC0415
 
     import numpy as np  # noqa: PLC0415
@@ -86,7 +103,8 @@ def run_tracker(example_name, module_path, num_frames, num_points, output_path, 
     # Create a headless viewer
     viewer = newton.viewer.ViewerNull(num_frames=num_frames)
 
-    # Build a minimal args namespace matching what examples expect
+    # Build a minimal args namespace matching what Example constructors expect.
+    # These fields mirror the CLI args from newton.examples.__main__.
     args = argparse.Namespace(
         device=device,
         viewer="null",
@@ -99,12 +117,14 @@ def run_tracker(example_name, module_path, num_frames, num_points, output_path, 
         rerun_address=None,
     )
 
-    # Import and instantiate the example
+    # Import and instantiate the example.
+    # Examples follow the Newton Example convention: Example(viewer, args)
     print(f"\nLoading example: {example_name} ({module_path})")
     mod = importlib.import_module(module_path)
     example = mod.Example(viewer, args)
 
-    # Find model and initial state
+    # Access the model and initial state from the example.
+    # By convention, examples expose these as public attributes.
     model = getattr(example, "model", None)
     state = getattr(example, "state_0", None)
     if model is None:
@@ -127,7 +147,9 @@ def run_tracker(example_name, module_path, num_frames, num_points, output_path, 
     print(f"  Tracking {tracker.num_points} surface points over {num_frames} frames...")
     tracker.record(state)
 
-    # Run simulation
+    # Run simulation loop, recording surface point positions after each step.
+    # Examples internally swap state buffers, so we re-read state_0 each frame
+    # to get the latest simulation state.
     t0 = time.time()
     for frame in range(num_frames):
         example.step()
@@ -135,6 +157,7 @@ def run_tracker(example_name, module_path, num_frames, num_points, output_path, 
         current_state = getattr(example, "state_0", state)
         tracker.record(current_state)
 
+        # Progress reporting every 20 frames
         if (frame + 1) % 20 == 0 or frame == num_frames - 1:
             elapsed = time.time() - t0
             print(f"  Frame {frame + 1}/{num_frames}  ({elapsed:.1f}s)")
@@ -142,10 +165,10 @@ def run_tracker(example_name, module_path, num_frames, num_points, output_path, 
     elapsed = time.time() - t0
     print(f"\nSimulation complete in {elapsed:.1f}s")
 
-    # Save
+    # Save trajectories and report statistics
     tracker.save(output_path)
 
-    # Report
+    # Load back and display summary info for quick verification
     data = np.load(output_path)
     positions = data["positions"]
     print(f"\nSaved: {output_path}")
@@ -153,7 +176,8 @@ def run_tracker(example_name, module_path, num_frames, num_points, output_path, 
     print(f"  Dtype: {positions.dtype}")
     print(f"  File size: {os.path.getsize(output_path) / 1024:.1f} KB")
 
-    # Quick sanity check: did anything move?
+    # Quick sanity check: report how much the tracked points moved overall.
+    # A displacement of 0 would indicate the scene is static or tracking failed.
     displacement = np.linalg.norm(positions[:, -1, :] - positions[:, 0, :], axis=1)
     print(f"  Mean displacement (first -> last frame): {displacement.mean():.4f}")
     print(f"  Max displacement:  {displacement.max():.4f}")
