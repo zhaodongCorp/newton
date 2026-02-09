@@ -728,8 +728,6 @@ def run_renderer(
         for _frame in range(num_frames):
             example.step()
             current_state = getattr(example, "state_0", state)
-            if model.joint_count > 0 and current_state.joint_q is not None:
-                newton.eval_fk(model, current_state.joint_q, current_state.joint_qd, current_state)
             tracker.record(current_state)
         trajectory_positions = np.stack(tracker._frames, axis=1)  # (num_points, num_frames+1, 3)
         traj_point_world = tracker._point_world
@@ -875,12 +873,6 @@ def run_renderer(
         if frame > 0:
             example.step()
         current_state = getattr(example, "state_0", state)
-
-        # Generalized-coordinate solvers (MuJoCo, Featherstone) update
-        # joint_q/joint_qd but not body_q.  Run forward kinematics to
-        # compute body transforms before rendering.
-        if model.joint_count > 0 and current_state.joint_q is not None:
-            newton.eval_fk(model, current_state.joint_q, current_state.joint_qd, current_state)
 
         # Clear injected particles before update_from_state so that
         # has_particles returns False (avoids crash when state.particle_q

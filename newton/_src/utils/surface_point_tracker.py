@@ -163,12 +163,19 @@ class SurfacePointTracker:
         # Per-point world index, derived from body_world.
         # Used to apply viewer-style world offsets for multi-world rendering.
         body_world = model.body_world.numpy() if hasattr(model, "body_world") and model.body_world is not None else None
+        shape_world = model.shape_world.numpy() if hasattr(model, "shape_world") and model.shape_world is not None else None
         point_world = np.zeros(num_points, dtype=np.int32)
         if body_world is not None:
             for i in range(num_points):
                 b = body_index[i]
                 if b >= 0 and b < len(body_world):
                     point_world[i] = body_world[b]
+                elif shape_world is not None:
+                    # For world-fixed shapes (body=-1), fall back to shape_world.
+                    surf_idx = sampled["surface_index"][i]
+                    s_idx = surfaces[surf_idx]["shape_index"]
+                    if 0 <= s_idx < len(shape_world):
+                        point_world[i] = shape_world[s_idx]
         self._point_world = point_world
 
         # Reusable output buffer — overwritten each frame, then copied to CPU

@@ -195,13 +195,6 @@ def run_tracker(example_name, module_path, num_frames, num_points, output_path, 
         example.step()
         # After step, state_0 has the latest state (examples swap internally)
         current_state = getattr(example, "state_0", state)
-
-        # Generalized-coordinate solvers (MuJoCo, Featherstone) update
-        # joint_q/joint_qd but not body_q.  Run forward kinematics to
-        # compute body transforms so surface point positions are correct.
-        if model.joint_count > 0 and current_state.joint_q is not None:
-            newton.eval_fk(model, current_state.joint_q, current_state.joint_qd, current_state)
-
         tracker.record(current_state)
 
         # Progress reporting every 20 frames
