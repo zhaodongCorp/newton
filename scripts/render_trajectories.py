@@ -643,7 +643,7 @@ def run_renderer(
     num_worlds=None,
     camera_distance=1.5,
     traj_pct=10,
-    depth_tol=0.01,
+    depth_tol=1e-4,
     name_prefix=None,
 ):
     """Load example, run simulation with rendering, save JPG frames."""
@@ -959,7 +959,7 @@ def main():
         help="Path to NPZ from track_surface_points.py (generates on the fly if omitted)",
     )
     parser.add_argument("--output-dir", type=str, required=True, help="Directory to save rendered JPG frames")
-    parser.add_argument("--num-frames", type=int, default=60, help="Number of simulation frames (default: 60)")
+    parser.add_argument("--num-frames", type=int, default=150, help="Number of simulation frames (default: 150)")
     parser.add_argument(
         "--num-points", type=int, default=1000, help="Number of surface points if generating on the fly (default: 1000)"
     )
@@ -980,8 +980,8 @@ def main():
     parser.add_argument(
         "--depth-tol",
         type=float,
-        default=0.01,
-        help="Depth tolerance as a fraction of bounding sphere radius (default: 0.01)",
+        default=1e-4,
+        help="Depth tolerance as a fraction of bounding sphere radius (default: 1e-4)",
     )
     parser.add_argument(
         "--num-worlds",

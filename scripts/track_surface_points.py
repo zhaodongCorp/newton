@@ -255,7 +255,7 @@ def run_tracker(example_name, module_path, num_frames, num_points, output_path, 
 def main():
     parser = argparse.ArgumentParser(description="Run a Newton example and save surface point trajectories.")
     parser.add_argument("--example", type=str, default=None, help="Example name (interactive picker if omitted)")
-    parser.add_argument("--num-frames", type=int, default=60, help="Number of simulation frames (default: 60)")
+    parser.add_argument("--num-frames", type=int, default=150, help="Number of simulation frames (default: 150)")
     parser.add_argument(
         "--num-points", type=int, default=1000, help="Number of surface points to track (default: 1000)"
     )

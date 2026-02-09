@@ -99,7 +99,7 @@ def main():
     parser.add_argument("--device", type=str, default=None, help="Warp device (e.g. cpu, cuda:0)")
 
     # Tracking params
-    parser.add_argument("--num-frames", type=int, default=60, help="Number of simulation frames")
+    parser.add_argument("--num-frames", type=int, default=150, help="Number of simulation frames")
     parser.add_argument("--num-points", type=int, default=1000, help="Number of surface points to track")
     parser.add_argument("--num-worlds", type=int, default=None, help="Number of simulation worlds")
 
@@ -107,7 +107,7 @@ def main():
     parser.add_argument("--resolution", type=int, default=512, help="Image resolution (width=height)")
     parser.add_argument("--camera-distance", type=float, default=1.5, help="Camera distance multiplier")
     parser.add_argument("--traj-pct", type=float, default=10, help="Percentage of trajectories to visualize")
-    parser.add_argument("--depth-tol", type=float, default=0.01, help="Depth tolerance (fraction of radius)")
+    parser.add_argument("--depth-tol", type=float, default=1e-4, help="Depth tolerance (fraction of radius)")
 
     # Video params
     parser.add_argument("--fps", type=int, default=24, help="Video frames per second")
