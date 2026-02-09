@@ -108,6 +108,7 @@ def main():
     parser.add_argument("--camera-distance", type=float, default=1.5, help="Camera distance multiplier")
     parser.add_argument("--traj-pct", type=float, default=10, help="Percentage of trajectories to visualize")
     parser.add_argument("--depth-tol", type=float, default=1e-4, help="Depth tolerance (fraction of radius)")
+    parser.add_argument("--min-pixels", type=float, default=1.0, help="Minimum shape thickness in pixels")
 
     # Video params
     parser.add_argument("--fps", type=int, default=24, help="Video frames per second")
@@ -180,6 +181,8 @@ def main():
         str(args.traj_pct),
         "--depth-tol",
         str(args.depth_tol),
+        "--min-pixels",
+        str(args.min_pixels),
     ]
     if args.device:
         render_cmd += ["--device", args.device]

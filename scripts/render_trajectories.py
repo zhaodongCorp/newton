@@ -552,7 +552,7 @@ def _bake_world_offsets_into_shape_transforms(model, worldfixed_mask, original_s
     wp.copy(model.shape_transform, temp)
 
 
-def _inflate_thin_shapes(model, radius, resolution, fov_rad, camera_distance, min_pixels=2.0):
+def _inflate_thin_shapes(model, radius, resolution, fov_rad, camera_distance, min_pixels=1.0):
     """Compute minimum half-extent for thin shape visibility.
 
     Returns the minimum half-extent threshold so that every shape subtends
@@ -713,6 +713,7 @@ def run_renderer(
     traj_pct=10,
     depth_tol=1e-4,
     name_prefix=None,
+    min_pixels=1.0,
 ):
     """Load example, run simulation with rendering, save JPG frames."""
     import importlib  # noqa: PLC0415
@@ -840,7 +841,7 @@ def run_renderer(
     # render pass.  The depth pass (for visibility) uses original sizes so
     # that trajectory point depths match the depth buffer accurately.
     fov_rad = math.radians(60.0)
-    min_half_extent = _inflate_thin_shapes(model, radius, resolution, fov_rad, camera_distance)
+    min_half_extent = _inflate_thin_shapes(model, radius, resolution, fov_rad, camera_distance, min_pixels=min_pixels)
     print(f"  Min shape half-extent for rendering: {min_half_extent:.4f}")
 
     num_cameras = 6
@@ -1104,6 +1105,12 @@ def main():
         default=None,
         help="Prefix for output filenames (default: example name)",
     )
+    parser.add_argument(
+        "--min-pixels",
+        type=float,
+        default=1.0,
+        help="Minimum shape thickness in pixels for the color render (default: 1.0)",
+    )
     args = parser.parse_args()
 
     example_map = discover_examples()
@@ -1144,6 +1151,7 @@ def main():
         traj_pct=args.traj_pct,
         depth_tol=args.depth_tol,
         name_prefix=args.name_prefix,
+        min_pixels=args.min_pixels,
     )
 
 
