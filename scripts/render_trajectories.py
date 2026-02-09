@@ -109,7 +109,7 @@ def create_axis_cameras(center, radius, num_worlds=1, distance_multiplier=1.5):
         (180.0, 30.0),  # back
         (270.0, 30.0),  # left
         (45.0, 60.0),  # high overview (front-right)
-        (0.0, 90.0),  # top-down
+        (0.0, 87.0),  # near top-down (slight tilt avoids sub-pixel aliasing on thin shapes)
     ]
 
     transforms = []
@@ -845,6 +845,7 @@ def run_renderer(
 
     # Assign shape colors to match ViewerGL appearance (Paul Tol Bright palette)
     _assign_viewer_colors(sensor, model)
+
     fov_rad = math.radians(60.0)
     camera_rays = sensor.compute_pinhole_camera_rays(
         resolution,
@@ -952,6 +953,11 @@ def run_renderer(
             refit_bvh=True,
             clear_data=clear_data,
         )
+
+        # Synchronize before the next iteration clears bvh_particles,
+        # otherwise the render kernel may still be reading the BVH when
+        # we free its GPU memory.
+        wp.synchronize_device()
 
         # Save frames with trail lines overlaid
         save_camera_frames(
