@@ -213,11 +213,10 @@ class SurfacePointTracker:
         self._frames.append(self._frame_positions.numpy().copy())
 
     def save(self, path: str) -> None:
-        """Save recorded trajectories to a compressed NPZ file.
+        """Save recorded trajectories to an NPY file.
 
-        The file contains:
-            - ``positions``: shape ``(num_points, num_frames, 3)`` -- trajectory positions.
-            - ``point_world``: shape ``(num_points,)`` -- world index for each point.
+        The file contains a single array of shape ``(num_points, num_frames, 3)``
+        storing world-space coordinates.
         """
         if not self._frames:
             raise ValueError("No frames recorded. Call record() at least once before save().")
@@ -227,12 +226,7 @@ class SurfacePointTracker:
         # Transpose to (num_points, num_frames, 3) so each row is one point's full trajectory
         positions = np.transpose(stacked, (1, 0, 2))
 
-        # Use compressed format to reduce file size (~3-6x smaller than uncompressed)
-        np.savez_compressed(
-            path,
-            positions=positions.astype(np.float32),
-            point_world=self._point_world,
-        )
+        np.save(path, positions.astype(np.float32))
 
     @staticmethod
     def _sample_points_on_surfaces(surfaces, num_points, seed=42):

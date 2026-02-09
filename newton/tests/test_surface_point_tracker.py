@@ -352,19 +352,15 @@ class TestSave(unittest.TestCase):
         tracker.record(state)
         tracker.record(state)
 
-        with tempfile.NamedTemporaryFile(suffix=".npz", delete=False) as f:
+        with tempfile.NamedTemporaryFile(suffix=".npy", delete=False) as f:
             path = f.name
 
         try:
             tracker.save(path)
-            data = np.load(path)
-            self.assertIn("positions", data)
-            self.assertIn("point_world", data)
+            positions = np.load(path)
             # Shape should be (num_points, num_frames, 3)
-            self.assertEqual(data["positions"].shape, (num_pts, 3, 3))
-            self.assertEqual(data["positions"].dtype, np.float32)
-            # point_world should be (num_points,) with int32 world indices
-            self.assertEqual(data["point_world"].shape, (num_pts,))
+            self.assertEqual(positions.shape, (num_pts, 3, 3))
+            self.assertEqual(positions.dtype, np.float32)
         finally:
             os.unlink(path)
 
@@ -380,7 +376,7 @@ class TestSave(unittest.TestCase):
 
         tracker = SurfacePointTracker(model, state, num_points=50)
         with self.assertRaises(ValueError):
-            tracker.save("/tmp/empty.npz")
+            tracker.save("/tmp/empty.npy")
 
 
 # =============================================================================
@@ -421,13 +417,12 @@ class TestEndToEnd(unittest.TestCase):
             # Swap buffers: state_1 becomes input for next step
             state_0, state_1 = state_1, state_0
 
-        with tempfile.NamedTemporaryFile(suffix=".npz", delete=False) as f:
+        with tempfile.NamedTemporaryFile(suffix=".npy", delete=False) as f:
             path = f.name
 
         try:
             tracker.save(path)
-            data = np.load(path)
-            positions = data["positions"]
+            positions = np.load(path)
 
             # 1 initial frame + 10 simulation frames = 11 total
             self.assertEqual(positions.shape, (50, num_frames + 1, 3))

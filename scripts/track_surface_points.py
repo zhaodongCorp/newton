@@ -239,8 +239,7 @@ def run_tracker(example_name, module_path, num_frames, num_points, output_path, 
     tracker.save(output_path)
 
     # Load back and display summary info for quick verification
-    data = np.load(output_path)
-    positions = data["positions"]
+    positions = np.load(output_path)
     print(f"\nSaved: {output_path}")
     print(f"  Shape: {positions.shape}  (num_points, num_frames, xyz)")
     print(f"  Dtype: {positions.dtype}")
@@ -261,7 +260,7 @@ def main():
         "--num-points", type=int, default=1000, help="Number of surface points to track (default: 1000)"
     )
     parser.add_argument(
-        "--output", type=str, default=None, help="Output NPZ path (default: /tmp/<example>_trajectories.npz)"
+        "--output", type=str, default=None, help="Output NPY path (default: /tmp/<example>_trajectories.npy)"
     )
     parser.add_argument("--device", type=str, default=None, help="Warp device (e.g. cpu, cuda:0)")
     parser.add_argument(
@@ -283,7 +282,7 @@ def main():
     else:
         example_name = pick_example(example_map)
 
-    output_path = args.output or f"/tmp/{example_name}_trajectories.npz"
+    output_path = args.output or f"/tmp/{example_name}_trajectories.npy"
 
     print(f"\n{'=' * 50}")
     print(f"  Example:    {example_name}")

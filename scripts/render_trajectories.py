@@ -685,18 +685,12 @@ def run_renderer(
     print(f"  Bodies: {model.body_count}, Shapes: {model.shape_count}")
 
     # Load or generate trajectories
-    trajectories_pre_offset = False  # Whether trajectory positions already include world offsets
+    trajectories_from_file = False
     if trajectories_path and os.path.exists(trajectories_path):
         print(f"  Loading trajectories from {trajectories_path}")
-        traj_data = np.load(trajectories_path)
-        trajectory_positions = traj_data["positions"]
-        # Trajectories saved by track_surface_points.py already have world
-        # offsets baked in (point_world is included for reference).
-        if "point_world" in traj_data:
-            trajectories_pre_offset = True
-            traj_point_world = traj_data["point_world"]
-        else:
-            traj_point_world = None
+        trajectory_positions = np.load(trajectories_path)
+        # Loaded trajectories are already in world-space (offsets baked in).
+        trajectories_from_file = True
     else:
         print(f"  Generating trajectories on the fly ({num_points} points)...")
         tracker = SurfacePointTracker(model, state, num_points=num_points, seed=42)
@@ -724,10 +718,9 @@ def run_renderer(
         print(
             f"  World offsets: {model.num_worlds} worlds, spacing ~{np.linalg.norm(world_offsets[1] - world_offsets[0]):.1f}"
         )
-        # Apply offsets to trajectory positions only if not already baked in.
-        # Pre-computed trajectories from track_surface_points.py have offsets
-        # applied at save time; on-the-fly trajectories need offsets here.
-        if not trajectories_pre_offset and traj_point_world is not None:
+        # Apply offsets to trajectory positions only for on-the-fly generation.
+        # Loaded trajectories are already in world-space.
+        if not trajectories_from_file:
             trajectory_positions = _apply_world_offsets_to_trajectories(
                 trajectory_positions,
                 traj_point_world,
@@ -927,13 +920,13 @@ def run_renderer(
 
     # Save per-camera visibility files
     for cam_idx in range(num_cameras):
-        vis_path = os.path.join(output_dir, f"cam_{cam_idx}_visibility.npz")
-        np.savez_compressed(vis_path, visibility=visibility_all[cam_idx])
+        vis_path = os.path.join(output_dir, f"cam_{cam_idx}_visibility.npy")
+        np.save(vis_path, visibility_all[cam_idx])
     total_visible = visibility_all.sum()
     total_entries = visibility_all.size
     pct_visible = 100.0 * total_visible / max(total_entries, 1)
     print(f"\nVisibility: {pct_visible:.1f}% of point-frame-camera entries visible")
-    print(f"  Saved {num_cameras} files: cam_*_visibility.npz  shape=({num_all}, {render_frames})")
+    print(f"  Saved {num_cameras} files: cam_*_visibility.npy  shape=({num_all}, {render_frames})")
     print(f"  Depth tolerance: {depth_tolerance:.4f}")
 
     # Summary
