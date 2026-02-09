@@ -109,7 +109,7 @@ def create_axis_cameras(center, radius, num_worlds=1, distance_multiplier=1.5):
         (180.0, 30.0),  # back
         (270.0, 30.0),  # left
         (45.0, 60.0),  # high overview (front-right)
-        (0.0, 87.0),  # near top-down (slight tilt avoids sub-pixel aliasing on thin shapes)
+        (0.0, 90.0),  # top-down
     ]
 
     transforms = []
@@ -552,6 +552,47 @@ def _bake_world_offsets_into_shape_transforms(model, worldfixed_mask, original_s
     wp.copy(model.shape_transform, temp)
 
 
+def _inflate_thin_shapes(model, radius, resolution, fov_rad, camera_distance, min_pixels=2.0):
+    """Compute minimum half-extent for thin shape visibility.
+
+    Returns the minimum half-extent threshold so that every shape subtends
+    at least ``min_pixels`` pixels from the farthest camera viewpoint.
+    This value is applied to ``render_context.shape_sizes`` after each
+    ``update_from_state()`` for the color render pass only — the depth
+    render (used for visibility) keeps the original sizes so that point
+    depths match accurately.
+    """
+    max_cam_dist = camera_distance * radius * 2.0  # conservative far bound
+    pixel_size = 2.0 * max_cam_dist * math.tan(fov_rad / 2.0) / resolution
+    min_half_extent = pixel_size * min_pixels / 2.0
+    return min_half_extent
+
+
+def _apply_shape_inflation(rc, model, min_half_extent):
+    """Inflate thin dimensions in render_context.shape_sizes for the color pass.
+
+    Must be called after update_from_state (which resets rc.shape_sizes from
+    model.shape_scale) and after the depth render, but before the color render.
+    """
+    import warp as wp  # noqa: PLC0415
+
+    scale = rc.shape_sizes.numpy()
+    num_inflated = 0
+    for s in range(len(scale)):
+        inflated = False
+        for d in range(3):
+            if 0 < scale[s, d] < min_half_extent:
+                scale[s, d] = min_half_extent
+                inflated = True
+        if inflated:
+            num_inflated += 1
+
+    if num_inflated > 0:
+        temp = wp.array(scale, dtype=wp.vec3f, device=rc.device)
+        wp.copy(rc.shape_sizes, temp)
+    return num_inflated
+
+
 def _apply_world_offsets_to_trajectories(trajectory_positions, point_world, world_offsets):
     """Apply per-world offsets to trajectory positions using per-point world mapping.
 
@@ -795,6 +836,13 @@ def run_renderer(
     if offset_body_q is not None:
         state.body_q = original_body_q
 
+    # Compute minimum half-extent for inflating thin shapes in the color
+    # render pass.  The depth pass (for visibility) uses original sizes so
+    # that trajectory point depths match the depth buffer accurately.
+    fov_rad = math.radians(60.0)
+    min_half_extent = _inflate_thin_shapes(model, radius, resolution, fov_rad, camera_distance)
+    print(f"  Min shape half-extent for rendering: {min_half_extent:.4f}")
+
     num_cameras = 6
     camera_transforms = create_axis_cameras(
         center, radius, num_worlds=model.num_worlds, distance_multiplier=camera_distance
@@ -846,7 +894,6 @@ def run_renderer(
     # Assign shape colors to match ViewerGL appearance (Paul Tol Bright palette)
     _assign_viewer_colors(sensor, model)
 
-    fov_rad = math.radians(60.0)
     camera_rays = sensor.compute_pinhole_camera_rays(
         resolution,
         resolution,
@@ -943,6 +990,12 @@ def run_renderer(
 
         # Inject trajectory particles as renderable spheres
         inject_trajectory_particles(sensor, vis_positions, frame_idx=frame + 1)
+
+        # Inflate thin shape dimensions for the color render so that
+        # sub-pixel geometry (e.g. thin rails) is visible from all angles.
+        # This must happen AFTER the depth render (which needs original
+        # sizes for accurate visibility) and BEFORE the color render.
+        _apply_shape_inflation(sensor.render_context, model, min_half_extent)
 
         # Color render pass (with trajectory particles)
         sensor.render(
