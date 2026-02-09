@@ -525,17 +525,21 @@ def _apply_world_offsets_to_body_q(state, model, world_offsets):
     return wp.array(body_q_np, dtype=wp.transformf, device=model.device)
 
 
-def _fixup_worldfixed_shape_transforms(sensor, worldfixed_mask, original_shape_world, world_offsets):
-    """Apply world offsets to shapes with body=-1 in the render context.
+def _bake_world_offsets_into_shape_transforms(model, worldfixed_mask, original_shape_world, world_offsets):
+    """Modify model.shape_transform in-place for body=-1 shapes.
 
-    The convert_newton_transform kernel skips shapes with body=-1 (they
-    keep their local shape_transform unchanged).  For multi-world rendering,
-    we need to manually shift these shapes by their world's offset so they
-    appear at the correct grid position.
+    For body=-1 shapes the convert_newton_transform kernel just copies
+    model.shape_transform unchanged.  By baking the world offset directly
+    into model.shape_transform, every subsequent update_from_state() call
+    produces the correct world-space transforms without any post-hoc fixup
+    or BVH invalidation.
+
+    Uses wp.copy to write back into the existing GPU array so that internal
+    references (CUDA graphs, etc.) remain valid.
     """
     import warp as wp  # noqa: PLC0415
 
-    xforms = sensor.render_context.shape_transforms.numpy()  # (num_shapes, 7)
+    xforms = model.shape_transform.numpy()  # (num_shapes, 7)
     for s in range(len(xforms)):
         if not worldfixed_mask[s]:
             continue
@@ -543,11 +547,9 @@ def _fixup_worldfixed_shape_transforms(sensor, worldfixed_mask, original_shape_w
         if 0 <= w < len(world_offsets):
             xforms[s, :3] += world_offsets[w]
 
-    sensor.render_context.shape_transforms = wp.array(
-        xforms,
-        dtype=wp.transformf,
-        device=sensor.render_context.device,
-    )
+    # Write back into the existing GPU array (preserves the pointer)
+    temp = wp.array(xforms, dtype=wp.transformf, device=model.device)
+    wp.copy(model.shape_transform, temp)
 
 
 def _apply_world_offsets_to_trajectories(trajectory_positions, point_world, world_offsets):
@@ -757,6 +759,26 @@ def run_renderer(
                 world_offsets,
             )
 
+    # For multi-world scenes, bake world offsets into model.shape_transform
+    # for body=-1 (world-fixed) shapes.  The convert_newton_transform kernel
+    # copies model.shape_transform directly for these shapes (no body_q
+    # multiplication), so baking offsets here makes every subsequent
+    # update_from_state() produce correct world-space positions without
+    # any per-frame fixup.
+    #
+    # This must happen BEFORE computing the bounding sphere so that
+    # body=-1 shapes at outer grid positions are included in the sphere.
+    worldfixed_shape_mask = None
+    if model.num_worlds > 1:
+        original_shape_world = model.shape_world.numpy().copy()
+        shape_body_np = model.shape_body.numpy()
+        worldfixed_shape_mask = shape_body_np < 0  # True for body=-1 shapes
+
+        if worldfixed_shape_mask.any():
+            _bake_world_offsets_into_shape_transforms(
+                model, worldfixed_shape_mask, original_shape_world, world_offsets
+            )
+
     # Apply offsets to a temporary state for bounding sphere computation
     offset_body_q = _apply_world_offsets_to_body_q(state, model, world_offsets)
     if offset_body_q is not None:
@@ -764,7 +786,9 @@ def run_renderer(
         original_body_q = state.body_q
         state.body_q = offset_body_q
 
-    # Compute bounding sphere and cameras
+    # Compute bounding sphere and cameras (model.shape_transform now
+    # includes world offsets for body=-1 shapes, so all shapes are
+    # accounted for at their rendered positions).
     center, radius = compute_bounding_sphere(model, state)
     print(f"  Bounding sphere: center={center}, radius={radius:.3f}")
 
@@ -807,18 +831,7 @@ def run_renderer(
     # every robot, not just world 0's.  SensorTiledCamera renders per-world;
     # shapes with world_index=-1 are placed in the global world group, which
     # is visible from every world tile.
-    #
-    # We also record which shapes have body=-1 (world-fixed) and their
-    # original world index.  The convert_newton_transform kernel skips
-    # body=-1 shapes, so we must apply world offsets to their render-context
-    # shape_transforms manually each frame.
-    original_shape_world = None
-    worldfixed_shape_mask = None
     if model.num_worlds > 1:
-        original_shape_world = model.shape_world.numpy().copy()
-        shape_body_np = model.shape_body.numpy()
-        worldfixed_shape_mask = shape_body_np < 0  # True for body=-1 shapes
-
         global_world = wp.array(
             np.full(model.shape_count, -1, dtype=np.int32),
             dtype=wp.int32,
@@ -888,6 +901,7 @@ def run_renderer(
 
         # Apply world offsets to body transforms so multi-world robots
         # appear spread out in a grid (matching ViewerGL layout).
+        # Body=-1 shapes already have offsets baked into model.shape_transform.
         if model.num_worlds > 1:
             offset_bq = _apply_world_offsets_to_body_q(current_state, model, world_offsets)
             if offset_bq is not None:
@@ -900,14 +914,6 @@ def run_renderer(
         # Restore original body_q so physics isn't affected
         if model.num_worlds > 1 and offset_bq is not None:
             current_state.body_q = original_bq
-
-        # Fix up world-fixed shapes (body=-1): the convert_newton_transform
-        # kernel leaves them at their local transform, so we must manually
-        # add each shape's world offset.
-        if worldfixed_shape_mask is not None and worldfixed_shape_mask.any():
-            _fixup_worldfixed_shape_transforms(
-                sensor, worldfixed_shape_mask, original_shape_world, world_offsets
-            )
 
         # Depth-only render pass (no trajectory particles) for visibility.
         # Particles are not yet injected, so the depth buffer reflects only
