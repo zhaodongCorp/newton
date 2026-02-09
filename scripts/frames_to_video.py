@@ -19,15 +19,18 @@ def make_video(frame_dir, output_path, fps):
     """Create an MP4 video from a directory of JPG frames.
 
     Args:
-        frame_dir: Directory containing frame_00001.jpg, frame_00002.jpg, ...
+        frame_dir: Directory containing *_frame_00001.jpg or frame_00001.jpg files.
         output_path: Output .mp4 file path.
         fps: Frames per second.
     """
     from PIL import Image  # noqa: PLC0415
 
-    frames = sorted(glob.glob(os.path.join(frame_dir, "frame_*.jpg")))
+    # Match both prefixed (*_frame_*.jpg) and unprefixed (frame_*.jpg) patterns
+    frames = sorted(glob.glob(os.path.join(frame_dir, "*_frame_*.jpg")))
     if not frames:
-        print(f"  Skipping {frame_dir} (no frame_*.jpg files)")
+        frames = sorted(glob.glob(os.path.join(frame_dir, "frame_*.jpg")))
+    if not frames:
+        print(f"  Skipping {frame_dir} (no *frame_*.jpg files)")
         return False
 
     # Read first frame to get dimensions
@@ -44,10 +47,17 @@ def make_video(frame_dir, output_path, fps):
             writer.write(frame)
         writer.release()
     except ImportError:
-        # Fallback: use ffmpeg subprocess
+        # Fallback: use ffmpeg subprocess.
+        # Derive the input pattern from the actual first filename so that
+        # both prefixed (e.g. basic_urdf_frame_00001.jpg) and unprefixed
+        # (frame_00001.jpg) naming conventions work.
+        import re  # noqa: PLC0415
         import subprocess  # noqa: PLC0415
 
-        pattern = os.path.join(frame_dir, "frame_%05d.jpg")
+        first_name = os.path.basename(frames[0])
+        # Replace the 5-digit number with ffmpeg's %05d placeholder
+        ffmpeg_name = re.sub(r"\d{5}", "%05d", first_name, count=1)
+        pattern = os.path.join(frame_dir, ffmpeg_name)
         cmd = [
             "ffmpeg",
             "-y",
@@ -81,11 +91,16 @@ def main():
         print(f"ERROR: {input_dir} is not a directory")
         sys.exit(1)
 
-    # Find cam_* folders
-    cam_dirs = sorted(glob.glob(os.path.join(input_dir, "cam_*")))
+    # Find camera folders: match both prefixed (e.g. basic_urdf_cam_0) and
+    # unprefixed (cam_0) naming conventions.
+    cam_dirs = sorted(glob.glob(os.path.join(input_dir, f"{args.name}_cam_*")))
     cam_dirs = [d for d in cam_dirs if os.path.isdir(d)]
     if not cam_dirs:
-        print(f"ERROR: No cam_* folders found in {input_dir}")
+        # Fallback to unprefixed pattern
+        cam_dirs = sorted(glob.glob(os.path.join(input_dir, "cam_*")))
+        cam_dirs = [d for d in cam_dirs if os.path.isdir(d)]
+    if not cam_dirs:
+        print(f"ERROR: No camera folders found in {input_dir}")
         sys.exit(1)
 
     # Create videos subfolder
@@ -100,11 +115,16 @@ def main():
 
     created = 0
     for cam_dir in cam_dirs:
-        cam_name = os.path.basename(cam_dir)  # e.g. "cam_0"
-        video_name = f"{args.name}_{cam_name}.mp4"
+        cam_name = os.path.basename(cam_dir)  # e.g. "basic_urdf_cam_0" or "cam_0"
+        # Avoid double-prefixing: if the folder name already starts with the
+        # video name prefix, use it directly; otherwise prepend the name.
+        if cam_name.startswith(f"{args.name}_"):
+            video_name = f"{cam_name}.mp4"
+        else:
+            video_name = f"{args.name}_{cam_name}.mp4"
         video_path = os.path.join(videos_dir, video_name)
 
-        num_frames = len(glob.glob(os.path.join(cam_dir, "frame_*.jpg")))
+        num_frames = len(glob.glob(os.path.join(cam_dir, "*frame_*.jpg")))
         print(f"  {cam_name}: {num_frames} frames -> {video_name}")
 
         if make_video(cam_dir, video_path, args.fps):

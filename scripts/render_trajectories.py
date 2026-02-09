@@ -259,6 +259,7 @@ def save_camera_frames(
     camera_transforms_np,
     fov_rad,
     resolution,
+    prefix,
     trail_length=20,
 ):
     """Extract per-camera images, draw trail lines, and save as RGB JPG.
@@ -348,9 +349,9 @@ def save_camera_frames(
                     if 0 <= x0 < resolution and 0 <= y0 < resolution and 0 <= x1 < resolution and 0 <= y1 < resolution:
                         draw.line([(x0, y0), (x1, y1)], fill=color, width=2)
 
-        cam_dir = os.path.join(output_dir, f"cam_{cam_idx}")
+        cam_dir = os.path.join(output_dir, f"{prefix}_cam_{cam_idx}")
         os.makedirs(cam_dir, exist_ok=True)
-        filepath = os.path.join(cam_dir, f"frame_{frame_idx + 1:05d}.jpg")
+        filepath = os.path.join(cam_dir, f"{prefix}_frame_{frame_idx + 1:05d}.jpg")
         img.save(filepath, quality=95)
 
 
@@ -643,6 +644,7 @@ def run_renderer(
     camera_distance=1.5,
     traj_pct=10,
     depth_tol=0.01,
+    name_prefix=None,
 ):
     """Load example, run simulation with rendering, save JPG frames."""
     import importlib  # noqa: PLC0415
@@ -654,6 +656,9 @@ def run_renderer(
     import newton.viewer  # noqa: PLC0415
     from newton.sensors import SensorTiledCamera  # noqa: PLC0415
     from newton.utils import SurfacePointTracker  # noqa: PLC0415
+
+    # Prefix for output filenames (cam dirs, visibility, etc.)
+    prefix = name_prefix or example_name
 
     if device:
         wp.set_device(device)
@@ -909,6 +914,7 @@ def run_renderer(
             camera_transforms_np,
             fov_rad,
             resolution,
+            prefix,
         )
 
         if (frame + 1) % 10 == 0 or frame == render_frames - 1:
@@ -920,20 +926,20 @@ def run_renderer(
 
     # Save per-camera visibility files
     for cam_idx in range(num_cameras):
-        vis_path = os.path.join(output_dir, f"cam_{cam_idx}_visibility.npy")
+        vis_path = os.path.join(output_dir, f"{prefix}_cam_{cam_idx}_visibility.npy")
         np.save(vis_path, visibility_all[cam_idx])
     total_visible = visibility_all.sum()
     total_entries = visibility_all.size
     pct_visible = 100.0 * total_visible / max(total_entries, 1)
     print(f"\nVisibility: {pct_visible:.1f}% of point-frame-camera entries visible")
-    print(f"  Saved {num_cameras} files: cam_*_visibility.npy  shape=({num_all}, {render_frames})")
+    print(f"  Saved {num_cameras} files: {prefix}_cam_*_visibility.npy  shape=({num_all}, {render_frames})")
     print(f"  Depth tolerance: {depth_tolerance:.4f}")
 
     # Summary
     total_files = 0
     total_size = 0
     for cam_idx in range(num_cameras):
-        cam_dir = os.path.join(output_dir, f"cam_{cam_idx}")
+        cam_dir = os.path.join(output_dir, f"{prefix}_cam_{cam_idx}")
         if os.path.isdir(cam_dir):
             files = [f for f in os.listdir(cam_dir) if f.endswith(".jpg")]
             total_files += len(files)
@@ -983,6 +989,12 @@ def main():
         default=None,
         help="Number of simulation worlds (default: example's own default)",
     )
+    parser.add_argument(
+        "--name-prefix",
+        type=str,
+        default=None,
+        help="Prefix for output filenames (default: example name)",
+    )
     args = parser.parse_args()
 
     example_map = discover_examples()
@@ -1022,6 +1034,7 @@ def main():
         camera_distance=args.camera_distance,
         traj_pct=args.traj_pct,
         depth_tol=args.depth_tol,
+        name_prefix=args.name_prefix,
     )
 
 
