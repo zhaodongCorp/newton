@@ -19,6 +19,7 @@ import numpy as np
 import warp as wp
 
 from newton._src.geometry.types import GeoType, Mesh
+from newton._src.geometry.flags import ShapeFlags
 from newton._src.utils.mesh import (
     create_box_mesh,
     create_capsule_mesh,
@@ -329,6 +330,14 @@ class SurfacePointTracker:
             # planes, and other static geometry should not consume trajectory
             # point budget since they never move during simulation.
             if body_idx < 0:
+                continue
+
+            # Skip collision-only shapes (not visible).  Many robots have
+            # detailed visual meshes alongside simplified collision primitives
+            # (boxes, cylinders).  Sampling on collision shapes produces points
+            # that float above the rendered visual surface.
+            shape_flags = int(model.shape_flags.numpy()[s_idx])
+            if not (shape_flags & int(ShapeFlags.VISIBLE)):
                 continue
 
             scale = model.shape_scale.numpy()[s_idx]
