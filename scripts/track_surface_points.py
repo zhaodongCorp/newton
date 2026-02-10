@@ -106,7 +106,9 @@ def _create_example(mod, viewer, args):
 
     sig = inspect.signature(mod.Example.__init__)
     params = list(sig.parameters.keys())  # includes 'self'
+    supported = {"self", "viewer", "num_worlds", "args", "headless", "test_mode", "verbose"}
     kwargs = {}
+    unsupported = []
     for name in params[1:]:  # skip 'self'
         if name == "viewer":
             kwargs["viewer"] = viewer
@@ -129,6 +131,17 @@ def _create_example(mod, viewer, args):
             kwargs["test_mode"] = getattr(args, "test", False)
         elif name == "verbose":
             kwargs["verbose"] = False
+        else:
+            p = sig.parameters[name]
+            if p.default is inspect.Parameter.empty:
+                unsupported.append(name)
+
+    if unsupported:
+        print(f"ERROR: Example requires unsupported constructor arguments: {', '.join(unsupported)}")
+        print("  This example has a non-standard setup that the pipeline cannot automate.")
+        print("  Supported parameters: viewer, num_worlds, args, headless, test_mode, verbose")
+        sys.exit(1)
+
     return mod.Example(**kwargs)
 
 
