@@ -84,8 +84,25 @@ def _create_example(mod, viewer, args):
     Newton examples have varying signatures: some take (viewer, args), others
     take (viewer, num_worlds, args), (viewer, num_worlds), (viewer,), etc.
     This helper inspects the constructor and passes matching arguments.
+
+    The ``args`` namespace is wrapped so that example-specific attributes
+    (e.g. ``use_mujoco_contacts``) return ``None`` instead of raising
+    ``AttributeError`` when they weren't defined by the tracker's CLI parser.
     """
     import inspect  # noqa: PLC0415
+
+    # Wrap args so missing example-specific attributes return None
+    class _ForgivingArgs:
+        def __init__(self, ns):
+            self.__dict__["_ns"] = ns
+
+        def __getattr__(self, name):
+            return getattr(self._ns, name, None)
+
+        def __setattr__(self, name, value):
+            setattr(self._ns, name, value)
+
+    safe_args = _ForgivingArgs(args)
 
     sig = inspect.signature(mod.Example.__init__)
     params = list(sig.parameters.keys())  # includes 'self'
@@ -105,7 +122,7 @@ def _create_example(mod, viewer, args):
                 else:
                     kwargs["num_worlds"] = 1
         elif name == "args":
-            kwargs["args"] = args
+            kwargs["args"] = safe_args
         elif name == "headless":
             kwargs["headless"] = getattr(args, "headless", True)
         elif name == "test_mode":
