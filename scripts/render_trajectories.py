@@ -371,6 +371,13 @@ def _assign_viewer_colors(sensor, model):
     For mesh shapes with a color attribute (from MJCF/URDF materials),
     uses the model's original color.  For other shapes, cycles through
     the Paul Tol Bright palette.  Ground planes get dark gray.
+
+    TODO: populate RenderContext texture arrays and material properties
+    (roughness, metallic) from Mesh objects to match ViewerGL appearance
+    more closely.  The warp raytracer's render_megakernel already supports
+    2D texture sampling and per-shape materials but they are not wired up
+    here.  Full PBR (Cook-Torrance BRDF, normal maps, env maps) would also
+    require changes to the raytracer kernel itself.
     """
     import numpy as np  # noqa: PLC0415
     import warp as wp  # noqa: PLC0415
