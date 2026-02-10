@@ -392,18 +392,22 @@ def _assign_viewer_colors(sensor, model):
 
     num_shapes = model.shape_count
     geo_types = model.shape_type.numpy()
-    geo_src_ptrs = model.shape_source_ptr.numpy() if hasattr(model, "shape_source_ptr") else None
+    shape_sources = model.shape_source  # Python list of Mesh/SDF objects indexed by shape
     colors = np.ones((num_shapes, 4), dtype=np.float32)
+
+    # Both MESH and CONVEX_MESH can carry material colors from MJCF/URDF
+    mesh_types = {int(newton.GeoType.MESH)}
+    if hasattr(newton.GeoType, "CONVEX_MESH"):
+        mesh_types.add(int(newton.GeoType.CONVEX_MESH))
 
     for s in range(num_shapes):
         geo_type = int(geo_types[s])
         if geo_type == int(newton.GeoType.PLANE):
             # Ground plane: dark gray (matches ViewerGL)
             colors[s] = [0.125, 0.125, 0.15, 1.0]
-        elif geo_type in (int(newton.GeoType.MESH),) and geo_src_ptrs is not None:
+        elif geo_type in mesh_types and s < len(shape_sources):
             # Mesh shapes: use the geometry source's color if available
-            src_idx = int(geo_src_ptrs[s])
-            geo_src = model.shape_source[src_idx] if src_idx < len(model.shape_source) else None
+            geo_src = shape_sources[s]
             if geo_src is not None and getattr(geo_src, "color", None) is not None:
                 c = geo_src.color
                 colors[s] = [c[0], c[1], c[2], 1.0]
