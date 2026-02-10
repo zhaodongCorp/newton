@@ -289,16 +289,26 @@ def save_camera_frames(
         b = ((pixel_data >> 16) & 0xFF).astype(np.float32)
 
         # Detect background pixels (white from clear_data) and replace
-        # with a sky gradient: light blue at top -> white at bottom.
+        # with a sky gradient: white at top -> blue at middle -> dark at bottom.
         is_bg = (r > 253.0) & (g > 253.0) & (b > 253.0)
 
-        # Build vertical gradient matching ViewerGL:
-        #   top = Sky Color (68, 161, 255), bottom = Ground Color (40, 44, 55)
+        # Build vertical gradient with three stops using smoothstep interpolation:
+        #   top = white, middle = Sky Color (68, 161, 255), bottom = Ground Color (40, 44, 55)
         h = pixel_data.shape[0]
-        sky_top = np.array([68.0, 161.0, 255.0])  # Sky Color
-        sky_bot = np.array([40.0, 44.0, 55.0])  # Ground Color
-        t = np.linspace(0.0, 1.0, h, dtype=np.float32)[:, None]  # (H, 1)
-        grad = sky_top * (1.0 - t) + sky_bot * t  # (H, 3)
+        sky_white = np.array([255.0, 255.0, 255.0])
+        sky_blue = np.array([68.0, 161.0, 255.0])
+        sky_bot = np.array([40.0, 44.0, 55.0])
+        t = np.linspace(0.0, 1.0, h, dtype=np.float32)
+        grad = np.empty((h, 3), dtype=np.float32)
+        for i in range(h):
+            if t[i] < 0.5:
+                s = t[i] / 0.5
+                s = s * s * (3.0 - 2.0 * s)  # smoothstep
+                grad[i] = sky_white * (1.0 - s) + sky_blue * s
+            else:
+                s = (t[i] - 0.5) / 0.5
+                s = s * s * (3.0 - 2.0 * s)  # smoothstep
+                grad[i] = sky_blue * (1.0 - s) + sky_bot * s
         # Broadcast gradient to full image width
         grad_r = np.broadcast_to(grad[:, 0:1], pixel_data.shape)
         grad_g = np.broadcast_to(grad[:, 1:2], pixel_data.shape)
