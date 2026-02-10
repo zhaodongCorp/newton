@@ -17,11 +17,12 @@ import time
 
 
 def compute_bounding_sphere(model, state):
-    """Compute bounding sphere (center, radius) from all shapes in the scene.
+    """Compute bounding sphere (center, radius) from dynamic body shapes only.
 
-    Iterates shapes, computes world-space positions using body transforms,
-    and builds an AABB. The bounding sphere is centered at the AABB center
-    with radius equal to half the AABB diagonal.
+    Focuses on shapes attached to dynamic bodies (body >= 0) so that
+    large static geometry (terrain meshes, ground planes) doesn't push
+    the cameras too far away.  Falls back to all shapes if no dynamic
+    shapes exist.
     """
     import numpy as np  # noqa: PLC0415
     import warp as wp  # noqa: PLC0415
@@ -31,33 +32,41 @@ def compute_bounding_sphere(model, state):
     shape_radius = model.shape_collision_radius.numpy()  # (num_shapes,)
     body_q = state.body_q.numpy() if state.body_q is not None else None  # (num_bodies, 7)
 
-    positions = []
-    radii = []
-    for i in range(model.shape_count):
-        r = float(shape_radius[i])
-        if r > 1.0e5:
-            # Skip infinite planes
-            continue
+    def _collect_shapes(include_static):
+        positions = []
+        radii = []
+        for i in range(model.shape_count):
+            r = float(shape_radius[i])
+            if r > 1.0e5:
+                # Skip infinite planes
+                continue
 
-        # Get shape local transform
-        shape_xform = shape_transforms[i]
-        shape_pos = shape_xform[:3]
+            body_idx = int(shape_body[i])
+            if not include_static and body_idx < 0:
+                continue
 
-        # Compose with body transform if attached
-        body_idx = int(shape_body[i])
-        if body_idx >= 0 and body_q is not None:
-            body_xform = body_q[body_idx]
-            body_pos = body_xform[:3]
-            body_rot = body_xform[3:]
-            # Transform shape position into world space
-            rotated = wp.quat_rotate(wp.quatf(*body_rot), wp.vec3f(*shape_pos))
-            world_pos = body_pos + np.array([float(rotated[0]), float(rotated[1]), float(rotated[2])])
-        else:
-            world_pos = shape_pos
+            # Get shape local transform
+            shape_xform = shape_transforms[i]
+            shape_pos = shape_xform[:3]
 
-        positions.append(world_pos)
-        radii.append(r)
+            # Compose with body transform if attached
+            if body_idx >= 0 and body_q is not None:
+                body_xform = body_q[body_idx]
+                body_pos = body_xform[:3]
+                body_rot = body_xform[3:]
+                rotated = wp.quat_rotate(wp.quatf(*body_rot), wp.vec3f(*shape_pos))
+                world_pos = body_pos + np.array([float(rotated[0]), float(rotated[1]), float(rotated[2])])
+            else:
+                world_pos = shape_pos
 
+            positions.append(world_pos)
+            radii.append(r)
+        return positions, radii
+
+    # First try dynamic shapes only; fall back to all if none found
+    positions, radii = _collect_shapes(include_static=False)
+    if not positions:
+        positions, radii = _collect_shapes(include_static=True)
     if not positions:
         return np.array([0.0, 0.0, 0.0]), 1.0
 

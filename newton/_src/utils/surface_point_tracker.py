@@ -324,6 +324,13 @@ class SurfacePointTracker:
         for s_idx in range(shape_count):
             geo_type = model.shape_type.numpy()[s_idx]
             body_idx = model.shape_body.numpy()[s_idx]
+
+            # Skip ground-attached shapes (body=-1): terrain meshes, ground
+            # planes, and other static geometry should not consume trajectory
+            # point budget since they never move during simulation.
+            if body_idx < 0:
+                continue
+
             scale = model.shape_scale.numpy()[s_idx]
             shape_xform = model.shape_transform.numpy()[s_idx]
 
