@@ -366,10 +366,11 @@ def save_camera_frames(
 
 
 def _assign_viewer_colors(sensor, model):
-    """Assign shape colors matching ViewerGL's Paul Tol Bright palette.
+    """Assign shape colors matching ViewerGL's appearance.
 
-    Replicates the color scheme from ViewerGL._shape_color_map() and the
-    dark gray + checkerboard appearance for ground planes.
+    For mesh shapes with a color attribute (from MJCF/URDF materials),
+    uses the model's original color.  For other shapes, cycles through
+    the Paul Tol Bright palette.  Ground planes get dark gray.
     """
     import numpy as np  # noqa: PLC0415
     import warp as wp  # noqa: PLC0415
@@ -391,12 +392,24 @@ def _assign_viewer_colors(sensor, model):
 
     num_shapes = model.shape_count
     geo_types = model.shape_type.numpy()
+    geo_src_ptrs = model.shape_source_ptr.numpy() if hasattr(model, "shape_source_ptr") else None
     colors = np.ones((num_shapes, 4), dtype=np.float32)
 
     for s in range(num_shapes):
-        if int(geo_types[s]) == int(newton.GeoType.PLANE):
+        geo_type = int(geo_types[s])
+        if geo_type == int(newton.GeoType.PLANE):
             # Ground plane: dark gray (matches ViewerGL)
             colors[s] = [0.125, 0.125, 0.15, 1.0]
+        elif geo_type in (int(newton.GeoType.MESH),) and geo_src_ptrs is not None:
+            # Mesh shapes: use the geometry source's color if available
+            src_idx = int(geo_src_ptrs[s])
+            geo_src = model.shape_source[src_idx] if src_idx < len(model.shape_source) else None
+            if geo_src is not None and getattr(geo_src, "color", None) is not None:
+                c = geo_src.color
+                colors[s] = [c[0], c[1], c[2], 1.0]
+            else:
+                c = palette[s % len(palette)]
+                colors[s] = [c[0] / 255.0, c[1] / 255.0, c[2] / 255.0, 1.0]
         else:
             c = palette[s % len(palette)]
             colors[s] = [c[0] / 255.0, c[1] / 255.0, c[2] / 255.0, 1.0]
