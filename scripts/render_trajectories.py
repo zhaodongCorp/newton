@@ -669,16 +669,22 @@ def _create_example(mod, viewer, args):
     """
     import inspect  # noqa: PLC0415
 
-    # Wrap args so missing example-specific attributes return None
+    # Wrap args so that ``getattr(args, "foo", default)`` works correctly
+    # (AttributeError is raised for missing attrs, letting the default apply),
+    # while examples that guard with ``args.X if args else ...`` still work
+    # because ``args`` is truthy.
     class _ForgivingArgs:
         def __init__(self, ns):
             self.__dict__["_ns"] = ns
 
         def __getattr__(self, name):
-            return getattr(self._ns, name, None)
+            return getattr(self._ns, name)
 
         def __setattr__(self, name, value):
             setattr(self._ns, name, value)
+
+        def __bool__(self):
+            return True
 
     safe_args = _ForgivingArgs(args)
 
@@ -815,6 +821,7 @@ def run_renderer(
         num_worlds=num_worlds,
         collision_pipeline="standard",
         broad_phase_mode="nxn",
+        use_mujoco_contacts=False,
         output_path=None,
         rerun_address=None,
     )
@@ -1183,7 +1190,15 @@ def main():
         default=1.0,
         help="Minimum shape thickness in pixels for the color render (default: 1.0)",
     )
-    args = parser.parse_args()
+
+    # Common example-specific args with defaults matching what examples expect
+    # when not explicitly provided.  This avoids AttributeError from examples
+    # that access args.X directly (guarded by ``if args``).
+    parser.add_argument("--use-mujoco-contacts", action="store_true", default=False)
+    parser.add_argument("--collision-pipeline", type=str, default=None)
+    parser.add_argument("--broad-phase-mode", type=str, default="explicit")
+
+    args, _ = parser.parse_known_args()
 
     example_map = discover_examples()
 
