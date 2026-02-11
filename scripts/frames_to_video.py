@@ -15,13 +15,15 @@ import os
 import sys
 
 
-def make_video(frame_dir, output_path, fps):
+def make_video(frame_dir, output_path, fps, crf=18):
     """Create an MP4 video from a directory of JPG frames.
 
     Args:
         frame_dir: Directory containing *_frame_00001.jpg or frame_00001.jpg files.
         output_path: Output .mp4 file path.
         fps: Frames per second.
+        crf: Constant Rate Factor for H.264 encoding (0-51, lower = higher
+            quality).  Default 18 is visually lossless.
     """
     from PIL import Image  # noqa: PLC0415
 
@@ -46,6 +48,34 @@ def make_video(frame_dir, output_path, fps):
             frame = cv2.imread(f)
             writer.write(frame)
         writer.release()
+
+        # Re-encode with ffmpeg for proper H.264 + CRF quality control.
+        # OpenCV's mp4v codec doesn't support CRF, so we transcode the
+        # output file.
+        import shutil  # noqa: PLC0415
+        import subprocess  # noqa: PLC0415
+
+        if shutil.which("ffmpeg"):
+            tmp_path = output_path + ".tmp.mp4"
+            os.rename(output_path, tmp_path)
+            cmd = [
+                "ffmpeg",
+                "-y",
+                "-i",
+                tmp_path,
+                "-c:v",
+                "libx264",
+                "-crf",
+                str(crf),
+                "-pix_fmt",
+                "yuv420p",
+                output_path,
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+            os.remove(tmp_path)
+            if result.returncode != 0:
+                print(f"  ffmpeg re-encode failed: {result.stderr.strip()}")
+                return False
     except ImportError:
         # Fallback: use ffmpeg subprocess.
         # Derive the input pattern from the actual first filename so that
@@ -67,6 +97,8 @@ def make_video(frame_dir, output_path, fps):
             pattern,
             "-c:v",
             "libx264",
+            "-crf",
+            str(crf),
             "-pix_fmt",
             "yuv420p",
             output_path,
@@ -84,6 +116,12 @@ def main():
     parser.add_argument("--input-dir", type=str, required=True, help="Root output directory containing cam_* folders")
     parser.add_argument("--name", type=str, required=True, help="Base name for video files (e.g. basic_urdf)")
     parser.add_argument("--fps", type=int, default=24, help="Frames per second (default: 24)")
+    parser.add_argument(
+        "--crf",
+        type=int,
+        default=18,
+        help="H.264 CRF quality (0-51, lower = higher quality, default: 18 visually lossless)",
+    )
     args = parser.parse_args()
 
     input_dir = args.input_dir
@@ -110,6 +148,7 @@ def main():
     print(f"Input:  {input_dir}")
     print(f"Output: {videos_dir}")
     print(f"FPS:    {args.fps}")
+    print(f"CRF:    {args.crf}")
     print(f"Cameras: {len(cam_dirs)}")
     print()
 
@@ -127,7 +166,7 @@ def main():
         num_frames = len(glob.glob(os.path.join(cam_dir, "*frame_*.jpg")))
         print(f"  {cam_name}: {num_frames} frames -> {video_name}")
 
-        if make_video(cam_dir, video_path, args.fps):
+        if make_video(cam_dir, video_path, args.fps, crf=args.crf):
             size_mb = os.path.getsize(video_path) / 1024 / 1024
             print(f"    -> {size_mb:.1f} MB")
             created += 1

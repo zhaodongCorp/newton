@@ -97,6 +97,12 @@ def main():
     parser.add_argument("--example", type=str, default=None, help="Example name (interactive picker if omitted)")
     parser.add_argument("--output-dir", type=str, default=None, help="Base output directory (default: /tmp/<example>)")
     parser.add_argument("--device", type=str, default=None, help="Warp device (e.g. cpu, cuda:0)")
+    parser.add_argument(
+        "--steps",
+        type=str,
+        default=None,
+        help="Comma-separated steps to run: track,render,video (default: all three)",
+    )
 
     # Tracking params
     parser.add_argument("--num-frames", type=int, default=150, help="Number of simulation frames")
@@ -112,8 +118,26 @@ def main():
 
     # Video params
     parser.add_argument("--fps", type=int, default=24, help="Video frames per second")
+    parser.add_argument(
+        "--crf",
+        type=int,
+        default=18,
+        help="H.264 CRF quality (0-51, lower = higher quality, default: 18 visually lossless)",
+    )
 
     args = parser.parse_args()
+
+    # Parse --steps
+    valid_steps = {"track", "render", "video"}
+    if args.steps:
+        steps = {s.strip() for s in args.steps.split(",")}
+        unknown = steps - valid_steps
+        if unknown:
+            print(f"ERROR: Unknown steps: {', '.join(sorted(unknown))}")
+            print(f"  Valid steps: {', '.join(sorted(valid_steps))}")
+            sys.exit(1)
+    else:
+        steps = valid_steps
 
     # Pick example
     example_map = discover_examples()
@@ -136,74 +160,89 @@ def main():
     print(f"\n{'#' * 60}")
     print(f"  Pipeline: {example_name}")
     print(f"  Output:   {output_dir}")
+    if steps != valid_steps:
+        print(f"  Steps:    {', '.join(sorted(steps))}")
     print(f"{'#' * 60}")
 
     scripts_dir = os.path.dirname(os.path.abspath(__file__))
     t_total = time.time()
 
     # Step 1: Track surface points
-    track_cmd = [
-        sys.executable,
-        os.path.join(scripts_dir, "track_surface_points.py"),
-        "--example",
-        example_name,
-        "--output",
-        trajectories_path,
-        "--num-frames",
-        str(args.num_frames),
-        "--num-points",
-        str(args.num_points),
-    ]
-    if args.device:
-        track_cmd += ["--device", args.device]
-    if args.num_worlds is not None:
-        track_cmd += ["--num-worlds", str(args.num_worlds)]
+    if "track" in steps:
+        track_cmd = [
+            sys.executable,
+            os.path.join(scripts_dir, "track_surface_points.py"),
+            "--example",
+            example_name,
+            "--output",
+            trajectories_path,
+            "--num-frames",
+            str(args.num_frames),
+            "--num-points",
+            str(args.num_points),
+        ]
+        if args.device:
+            track_cmd += ["--device", args.device]
+        if args.num_worlds is not None:
+            track_cmd += ["--num-worlds", str(args.num_worlds)]
 
-    run_step("Track surface points", track_cmd)
+        run_step("Track surface points", track_cmd)
 
     # Step 2: Render trajectories
-    render_cmd = [
-        sys.executable,
-        os.path.join(scripts_dir, "render_trajectories.py"),
-        "--example",
-        example_name,
-        "--trajectories",
-        trajectories_path,
-        "--output-dir",
-        renders_dir,
-        "--num-frames",
-        str(args.num_frames),
-        "--resolution",
-        str(args.resolution),
-        "--camera-distance",
-        str(args.camera_distance),
-        "--traj-pct",
-        str(args.traj_pct),
-        "--depth-tol",
-        str(args.depth_tol),
-        "--min-pixels",
-        str(args.min_pixels),
-    ]
-    if args.device:
-        render_cmd += ["--device", args.device]
-    if args.num_worlds is not None:
-        render_cmd += ["--num-worlds", str(args.num_worlds)]
+    if "render" in steps:
+        if not os.path.isfile(trajectories_path):
+            print(f"\nERROR: Trajectories file not found: {trajectories_path}")
+            print("  Run with --steps track first, or --steps track,render")
+            sys.exit(1)
+        render_cmd = [
+            sys.executable,
+            os.path.join(scripts_dir, "render_trajectories.py"),
+            "--example",
+            example_name,
+            "--trajectories",
+            trajectories_path,
+            "--output-dir",
+            renders_dir,
+            "--num-frames",
+            str(args.num_frames),
+            "--resolution",
+            str(args.resolution),
+            "--camera-distance",
+            str(args.camera_distance),
+            "--traj-pct",
+            str(args.traj_pct),
+            "--depth-tol",
+            str(args.depth_tol),
+            "--min-pixels",
+            str(args.min_pixels),
+        ]
+        if args.device:
+            render_cmd += ["--device", args.device]
+        if args.num_worlds is not None:
+            render_cmd += ["--num-worlds", str(args.num_worlds)]
 
-    run_step("Render 6-camera frames + visibility", render_cmd)
+        run_step("Render 6-camera frames + visibility", render_cmd)
 
     # Step 3: Generate videos
-    video_cmd = [
-        sys.executable,
-        os.path.join(scripts_dir, "frames_to_video.py"),
-        "--input-dir",
-        renders_dir,
-        "--name",
-        example_name,
-        "--fps",
-        str(args.fps),
-    ]
+    if "video" in steps:
+        if not os.path.isdir(renders_dir):
+            print(f"\nERROR: Renders directory not found: {renders_dir}")
+            print("  Run with --steps render first, or --steps render,video")
+            sys.exit(1)
+        video_cmd = [
+            sys.executable,
+            os.path.join(scripts_dir, "frames_to_video.py"),
+            "--input-dir",
+            renders_dir,
+            "--name",
+            example_name,
+            "--fps",
+            str(args.fps),
+            "--crf",
+            str(args.crf),
+        ]
 
-    run_step("Generate MP4 videos", video_cmd)
+        run_step("Generate MP4 videos", video_cmd)
 
     elapsed_total = time.time() - t_total
 
