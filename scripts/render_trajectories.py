@@ -953,6 +953,12 @@ def run_renderer(
         center, radius, num_worlds=model.num_worlds, distance_multiplier=camera_distance
     )
 
+    # Particle/cloth scenes need double-sided rendering so the mesh is
+    # visible from both sides.  We keep backface culling ON for the depth
+    # pass (better visibility accuracy) and toggle it OFF only for the
+    # color render pass below.
+    has_particles = model.particle_count > 0
+
     # Set up sensor
     sensor = SensorTiledCamera(
         model=model,
@@ -998,6 +1004,10 @@ def run_renderer(
 
     # Assign shape colors to match ViewerGL appearance (Paul Tol Bright palette)
     _assign_viewer_colors(sensor, model)
+
+    # Set triangle mesh (cloth) color to match ViewerGL's default tan (0.7, 0.5, 0.3)
+    if model.tri_count > 0:
+        sensor.render_context.triangle_mesh_color = (0.7, 0.5, 0.3, 1.0)
 
     camera_rays = sensor.compute_pinhole_camera_rays(
         resolution,
@@ -1102,6 +1112,11 @@ def run_renderer(
         # sizes for accurate visibility) and BEFORE the color render.
         _apply_shape_inflation(sensor.render_context, model, min_half_extent)
 
+        # For cloth/particle scenes, disable back-face culling for the
+        # color render so the mesh is visible from both sides.
+        if has_particles:
+            sensor.render_context.options.enable_backface_culling = False
+
         # Color render pass (with trajectory particles)
         sensor.render(
             None,
@@ -1111,6 +1126,10 @@ def run_renderer(
             refit_bvh=True,
             clear_data=clear_data,
         )
+
+        # Restore backface culling for the next frame's depth pass
+        if has_particles:
+            sensor.render_context.options.enable_backface_culling = True
 
         # Synchronize before the next iteration clears bvh_particles,
         # otherwise the render kernel may still be reading the BVH when
