@@ -453,7 +453,38 @@ def _assign_viewer_colors(sensor, model):
     )
 
 
-_debug_visibility = False
+def _apply_example_shape_colors(sensor, model, example):
+    """Apply custom shape colors defined by the example.
+
+    Some examples (e.g. ik_cube_stacking) set per-shape colors via
+    ``viewer.update_shape_colors()``.  Since ViewerNull discards those
+    calls, we extract colors from the example's own attributes and apply
+    them to the sensor's shape_colors array.
+
+    Recognized patterns:
+        - ``example.cube_colors`` (dict of shape_key -> [r,g,b])
+          with ``example.shape_map`` (dict of shape_key -> shape_index)
+    """
+    import numpy as np  # noqa: PLC0415
+    import warp as wp  # noqa: PLC0415
+
+    colors_np = sensor.render_context.shape_colors.numpy()  # (num_shapes, 4)
+    modified = False
+
+    # Pattern: cube_colors + shape_map (ik_cube_stacking and similar examples)
+    cube_colors = getattr(example, "cube_colors", None)
+    shape_map = getattr(example, "shape_map", None)
+    if cube_colors and shape_map:
+        for key, rgb in cube_colors.items():
+            if key in shape_map:
+                s_idx = shape_map[key]
+                if 0 <= s_idx < len(colors_np):
+                    colors_np[s_idx] = [rgb[0], rgb[1], rgb[2], 1.0]
+                    modified = True
+
+    if modified:
+        temp = wp.array(colors_np, dtype=wp.vec4f, device=sensor.render_context.device)
+        wp.copy(sensor.render_context.shape_colors, temp)
 
 
 def _compute_visibility(
@@ -1010,6 +1041,10 @@ def run_renderer(
     # Assign shape colors to match ViewerGL appearance (Paul Tol Bright palette)
     _assign_viewer_colors(sensor, model)
 
+    # Apply any custom shape colors defined by the example (e.g. cube colors
+    # set via viewer.update_shape_colors() which ViewerNull discards).
+    _apply_example_shape_colors(sensor, model, example)
+
     # Set triangle mesh (cloth) color to match ViewerGL's default tan (0.7, 0.5, 0.3)
     if model.tri_count > 0:
         sensor.render_context.triangle_mesh_color = (0.7, 0.5, 0.3, 1.0)
@@ -1042,7 +1077,7 @@ def run_renderer(
     camera_transforms_np = camera_transforms.numpy()  # (6, num_worlds, 7)
 
     # Render each frame
-    render_frames = min(num_frames, total_frames - 1)
+    render_frames = min(num_frames, total_frames)
     t0 = time.time()
     print(f"\n  Rendering {render_frames} frames at {resolution}x{resolution} from {num_cameras} cameras...")
 
@@ -1099,7 +1134,7 @@ def run_renderer(
         vis = _compute_visibility(
             depth_image,
             trajectory_positions,
-            frame_idx=frame + 1,
+            frame_idx=frame,
             num_cameras=num_cameras,
             camera_transforms_np=camera_transforms_np,
             fov_rad=fov_rad,
@@ -1109,7 +1144,7 @@ def run_renderer(
         visibility_all[:, :, frame] = vis
 
         # Inject trajectory particles as renderable spheres
-        inject_trajectory_particles(sensor, vis_positions, frame_idx=frame + 1)
+        inject_trajectory_particles(sensor, vis_positions, frame_idx=frame)
 
         # Inflate thin shape dimensions for the color render so that
         # sub-pixel geometry (e.g. thin rails) is visible from all angles.
