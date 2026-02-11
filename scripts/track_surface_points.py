@@ -199,15 +199,16 @@ def run_tracker(example_name, module_path, num_frames, num_points, output_path, 
     example = _create_example(mod, viewer, args)
 
     # Access the model and initial state from the example.
-    # By convention, examples expose these as public attributes.
+    # Examples use varying attribute names: state_0, state, etc.
     model = getattr(example, "model", None)
-    state = getattr(example, "state_0", None)
+    state = getattr(example, "state_0", None) or getattr(example, "state", None)
     if model is None:
         print("ERROR: Example does not expose 'model' attribute.")
         sys.exit(1)
     if state is None:
-        print("ERROR: Example does not expose 'state_0' attribute.")
+        print("ERROR: Example does not expose 'state_0' or 'state' attribute.")
         sys.exit(1)
+    state_attr = "state_0" if hasattr(example, "state_0") else "state"
 
     print(
         f"  Bodies: {model.body_count}, Shapes: {model.shape_count}, "
@@ -225,13 +226,13 @@ def run_tracker(example_name, module_path, num_frames, num_points, output_path, 
     tracker.record(state)
 
     # Run simulation loop, recording surface point positions after each step.
-    # Examples internally swap state buffers, so we re-read state_0 each frame
+    # Examples internally swap state buffers, so we re-read the state each frame
     # to get the latest simulation state.
     t0 = time.time()
     for frame in range(num_frames):
         example.step()
-        # After step, state_0 has the latest state (examples swap internally)
-        current_state = getattr(example, "state_0", state)
+        # After step, read the latest state (examples may swap internally)
+        current_state = getattr(example, state_attr, state)
         tracker.record(current_state)
 
         # Progress reporting every 20 frames

@@ -855,10 +855,11 @@ def run_renderer(
     example = _create_example(mod, viewer, args)
 
     model = getattr(example, "model", None)
-    state = getattr(example, "state_0", None)
+    state = getattr(example, "state_0", None) or getattr(example, "state", None)
     if model is None or state is None:
-        print("ERROR: Example does not expose 'model' and 'state_0'.")
+        print("ERROR: Example does not expose 'model' and 'state_0'/'state'.")
         sys.exit(1)
+    state_attr = "state_0" if hasattr(example, "state_0") else "state"
 
     print(f"  Bodies: {model.body_count}, Shapes: {model.shape_count}")
 
@@ -875,7 +876,7 @@ def run_renderer(
         tracker.record(state)
         for _frame in range(num_frames):
             example.step()
-            current_state = getattr(example, "state_0", state)
+            current_state = getattr(example, state_attr, state)
             tracker.record(current_state)
         trajectory_positions = np.stack(tracker._frames, axis=1)  # (num_points, num_frames+1, 3)
         traj_point_world = tracker._point_world
@@ -883,7 +884,7 @@ def run_renderer(
         viewer = newton.viewer.ViewerNull(num_frames=num_frames)
         example = _create_example(mod, viewer, args)
         model = example.model
-        state = getattr(example, "state_0", state)
+        state = getattr(example, state_attr, state)
 
     total_frames = trajectory_positions.shape[1]
     print(f"  Trajectory: {trajectory_positions.shape[0]} points, {total_frames} frames")
@@ -1048,7 +1049,7 @@ def run_renderer(
     for frame in range(render_frames):
         if frame > 0:
             example.step()
-        current_state = getattr(example, "state_0", state)
+        current_state = getattr(example, state_attr, state)
 
         # Clear injected particles before update_from_state so that
         # has_particles returns False (avoids crash when state.particle_q
