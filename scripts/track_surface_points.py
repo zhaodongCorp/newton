@@ -199,14 +199,18 @@ def run_tracker(example_name, module_path, num_frames, num_points, output_path, 
     example = _create_example(mod, viewer, args)
 
     # Access the model and initial state from the example.
-    # Examples use varying attribute names: state_0, state, etc.
+    # Examples use varying attribute names: state_0, state, states (list), etc.
     model = getattr(example, "model", None)
     state = getattr(example, "state_0", None) or getattr(example, "state", None)
+    if state is None:
+        states = getattr(example, "states", None)
+        if states and len(states) > 0:
+            state = states[0]
     if model is None:
         print("ERROR: Example does not expose 'model' attribute.")
         sys.exit(1)
     if state is None:
-        print("ERROR: Example does not expose 'state_0' or 'state' attribute.")
+        print("ERROR: Example does not expose 'state_0', 'state', or 'states' attribute.")
         sys.exit(1)
     state_attr = "state_0" if hasattr(example, "state_0") else "state"
 

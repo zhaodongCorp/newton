@@ -856,8 +856,12 @@ def run_renderer(
 
     model = getattr(example, "model", None)
     state = getattr(example, "state_0", None) or getattr(example, "state", None)
+    if state is None:
+        states = getattr(example, "states", None)
+        if states and len(states) > 0:
+            state = states[0]
     if model is None or state is None:
-        print("ERROR: Example does not expose 'model' and 'state_0'/'state'.")
+        print("ERROR: Example does not expose 'model' and 'state_0'/'state'/'states'.")
         sys.exit(1)
     state_attr = "state_0" if hasattr(example, "state_0") else "state"
 
