@@ -624,31 +624,30 @@ def _apply_world_offsets_to_body_q(state, model, world_offsets):
     return wp.array(body_q_np, dtype=wp.transformf, device=model.device)
 
 
-def _bake_world_offsets_into_shape_transforms(model, worldfixed_mask, original_shape_world, world_offsets):
-    """Modify model.shape_transform in-place for body=-1 shapes.
+def _apply_worldfixed_offsets_to_rc(rc, model, shape_world_np, world_offsets):
+    """Apply world offsets to render-context transforms for body=-1 shapes.
 
-    For body=-1 shapes the convert_newton_transform kernel just copies
-    model.shape_transform unchanged.  By baking the world offset directly
-    into model.shape_transform, every subsequent update_from_state() call
-    produces the correct world-space transforms without any post-hoc fixup
-    or BVH invalidation.
-
-    Uses wp.copy to write back into the existing GPU array so that internal
-    references (CUDA graphs, etc.) remain valid.
+    ``update_from_state()`` copies ``model.shape_transform`` unchanged for
+    body=-1 shapes.  This post-hoc fixup shifts those transforms in the
+    render context so they appear at their grid positions, without modifying
+    ``model.shape_transform`` itself (which the physics / CUDA graph reads).
     """
     import warp as wp  # noqa: PLC0415
 
-    xforms = model.shape_transform.numpy()  # (num_shapes, 7)
+    shape_body_np = model.shape_body.numpy()
+    xforms = rc.shape_transforms.numpy()  # (num_shapes, 7)
+    modified = False
     for s in range(len(xforms)):
-        if not worldfixed_mask[s]:
+        if shape_body_np[s] >= 0:
             continue
-        w = int(original_shape_world[s])
+        w = int(shape_world_np[s])
         if 0 <= w < len(world_offsets):
             xforms[s, :3] += world_offsets[w]
+            modified = True
 
-    # Write back into the existing GPU array (preserves the pointer)
-    temp = wp.array(xforms, dtype=wp.transformf, device=model.device)
-    wp.copy(model.shape_transform, temp)
+    if modified:
+        temp = wp.array(xforms, dtype=wp.transformf, device=rc.device)
+        wp.copy(rc.shape_transforms, temp)
 
 
 def _inflate_thin_shapes(model, radius, resolution, fov_rad, camera_distance, min_pixels=1.0):
@@ -941,25 +940,12 @@ def run_renderer(
                 world_offsets,
             )
 
-    # For multi-world scenes, bake world offsets into model.shape_transform
-    # for body=-1 (world-fixed) shapes.  The convert_newton_transform kernel
-    # copies model.shape_transform directly for these shapes (no body_q
-    # multiplication), so baking offsets here makes every subsequent
-    # update_from_state() produce correct world-space positions without
-    # any per-frame fixup.
-    #
-    # This must happen BEFORE computing the bounding sphere so that
-    # body=-1 shapes at outer grid positions are included in the sphere.
-    worldfixed_shape_mask = None
+    # For multi-world scenes, record shape world indices and body=-1 mask.
+    # World offsets are applied per-frame to the render context (not to the
+    # model) so that the physics / CUDA graph sees the original transforms.
+    original_shape_world = None
     if model.num_worlds > 1:
         original_shape_world = model.shape_world.numpy().copy()
-        shape_body_np = model.shape_body.numpy()
-        worldfixed_shape_mask = shape_body_np < 0  # True for body=-1 shapes
-
-        if worldfixed_shape_mask.any():
-            _bake_world_offsets_into_shape_transforms(
-                model, worldfixed_shape_mask, original_shape_world, world_offsets
-            )
 
     # Apply offsets to a temporary state for bounding sphere computation
     offset_body_q = _apply_world_offsets_to_body_q(state, model, world_offsets)
@@ -968,9 +954,10 @@ def run_renderer(
         original_body_q = state.body_q
         state.body_q = offset_body_q
 
-    # Compute bounding sphere and cameras (model.shape_transform now
-    # includes world offsets for body=-1 shapes, so all shapes are
-    # accounted for at their rendered positions).
+    # Compute bounding sphere and cameras.  The offset body_q ensures
+    # dynamic shapes at grid positions are included.  Body=-1 shapes
+    # (tables, ground) are excluded from dynamic-only mode so they
+    # don't need offsets here.
     center, radius = compute_bounding_sphere(model, state)
     print(f"  Bounding sphere: center={center}, radius={radius:.3f}")
 
@@ -1104,7 +1091,7 @@ def run_renderer(
 
         # Apply world offsets to body transforms so multi-world robots
         # appear spread out in a grid (matching ViewerGL layout).
-        # Body=-1 shapes already have offsets baked into model.shape_transform.
+        # Body=-1 shapes are handled separately after update_from_state.
         if model.num_worlds > 1:
             offset_bq = _apply_world_offsets_to_body_q(current_state, model, world_offsets)
             if offset_bq is not None:
@@ -1117,6 +1104,15 @@ def run_renderer(
         # Restore original body_q so physics isn't affected
         if model.num_worlds > 1 and offset_bq is not None:
             current_state.body_q = original_bq
+
+        # Apply world offsets to body=-1 shapes in the render context.
+        # This is done per-frame (after update_from_state resets transforms
+        # from the model) rather than baking into model.shape_transform,
+        # which would corrupt the CUDA-graph-captured collision pipeline.
+        if model.num_worlds > 1 and original_shape_world is not None:
+            _apply_worldfixed_offsets_to_rc(
+                sensor.render_context, model, original_shape_world, world_offsets
+            )
 
         # Depth-only render pass (no trajectory particles) for visibility.
         # Particles are not yet injected, so the depth buffer reflects only
