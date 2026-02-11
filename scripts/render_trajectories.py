@@ -17,12 +17,12 @@ import time
 
 
 def compute_bounding_sphere(model, state):
-    """Compute bounding sphere (center, radius) from dynamic body shapes only.
+    """Compute bounding sphere (center, radius) from dynamic scene content.
 
-    Focuses on shapes attached to dynamic bodies (body >= 0) so that
-    large static geometry (terrain meshes, ground planes) doesn't push
-    the cameras too far away.  Falls back to all shapes if no dynamic
-    shapes exist.
+    Considers both rigid body shapes (body >= 0) and particle positions
+    so that cloth/particle-based examples are properly framed.  Large
+    static geometry (terrain meshes, ground planes) is excluded to keep
+    cameras close.  Falls back to all shapes if no dynamic content exists.
     """
     import numpy as np  # noqa: PLC0415
     import warp as wp  # noqa: PLC0415
@@ -67,6 +67,18 @@ def compute_bounding_sphere(model, state):
     positions, radii = _collect_shapes(include_static=False)
     if not positions:
         positions, radii = _collect_shapes(include_static=True)
+
+    # Include particle positions for cloth/particle-based scenes
+    particle_q = state.particle_q
+    if particle_q is not None and particle_q.shape[0] > 0:
+        pq = particle_q.numpy()  # (num_particles, 3)
+        pq_min = pq.min(axis=0)
+        pq_max = pq.max(axis=0)
+        # Represent particle cloud as two corner points with zero radius
+        positions.append(pq_min)
+        positions.append(pq_max)
+        radii.extend([0.0, 0.0])
+
     if not positions:
         return np.array([0.0, 0.0, 0.0]), 1.0
 
@@ -441,6 +453,9 @@ def _assign_viewer_colors(sensor, model):
     )
 
 
+_debug_visibility = False
+
+
 def _compute_visibility(
     depth_image,
     trajectory_positions,
@@ -453,10 +468,17 @@ def _compute_visibility(
 ):
     """Compute per-point visibility for each camera using the depth buffer.
 
-    For each camera, projects every trajectory point to 2D, reads the
-    rendered depth at that pixel, and compares with the actual point
-    distance to the camera. Points whose depth matches (within tolerance)
-    are marked visible.
+    A point is visible from a camera if:
+    1. It is in front of the camera and projects within the image frame.
+    2. No scene surface occludes it — i.e. the rendered depth at the
+       projected pixel is at least as far as the point's distance
+       (within tolerance).
+
+    This occlusion-based test is more robust than exact depth matching
+    for particle/cloth examples where the simulation replay may not be
+    perfectly deterministic: the rendered mesh can shift slightly between
+    runs, but points that are not hidden behind geometry are still
+    correctly marked as visible.
 
     Args:
         depth_image: Warp array of shape (num_worlds, num_cameras, H, W), dtype float32.
@@ -466,7 +488,7 @@ def _compute_visibility(
         camera_transforms_np: (num_cameras, num_worlds, 7) numpy array.
         fov_rad: Camera FOV in radians.
         resolution: Image width/height in pixels.
-        depth_tolerance: Maximum allowed depth difference to count as visible.
+        depth_tolerance: Slack added to rendered depth for the occlusion test.
 
     Returns:
         visibility: (num_cameras, num_points) uint8 array with 0/1 values.
@@ -499,9 +521,12 @@ def _compute_visibility(
                 continue
             rendered_depth = cam_depth[py, px]
             if rendered_depth <= 0.0:
-                # No hit at this pixel (clear value)
+                # No surface hit at this pixel — point is in empty space,
+                # nothing occludes it, so it is visible.
+                visibility[cam_idx, pt] = 1
                 continue
-            if abs(rendered_depth - dists[pt]) < depth_tolerance:
+            # Point is visible if it is not behind the rendered surface
+            if dists[pt] <= rendered_depth + depth_tolerance:
                 visibility[cam_idx, pt] = 1
 
     return visibility
