@@ -451,7 +451,7 @@ def parse_usd(
                         if dc_val and len(dc_val) > 0:
                             c = dc_val[0]
                             color = (float(c[0]), float(c[1]), float(c[2]))
-                if color is not None and mesh.texture is None:
+                if color is not None:
                     mesh.color = color
                 if material_props.get("roughness") is not None:
                     mesh.roughness = material_props["roughness"]
