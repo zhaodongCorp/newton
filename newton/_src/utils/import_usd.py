@@ -440,8 +440,19 @@ def parse_usd(
                         stacklevel=2,
                     )
                     mesh.texture = None
-                if material_props.get("color") is not None and mesh.texture is None:
-                    mesh.color = material_props["color"]
+                # Fall back to primvars:displayColor when the material resolver
+                # yields no color (e.g. prototype prims with MaterialBindingAPI
+                # applied but no actual material bound).
+                color = material_props.get("color")
+                if color is None and mesh.texture is None:
+                    dc = UsdGeom.PrimvarsAPI(prim).GetPrimvar("displayColor")
+                    if dc:
+                        dc_val = dc.Get()
+                        if dc_val and len(dc_val) > 0:
+                            c = dc_val[0]
+                            color = (float(c[0]), float(c[1]), float(c[2]))
+                if color is not None and mesh.texture is None:
+                    mesh.color = color
                 if material_props.get("roughness") is not None:
                     mesh.roughness = material_props["roughness"]
                 if material_props.get("metallic") is not None:
