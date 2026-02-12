@@ -171,8 +171,9 @@ def create_axis_cameras(center, radius, num_worlds=1, distance_multiplier=1.5):
 def inject_trajectory_particles(sensor, trajectory_positions, frame_idx, trail_length=20):
     """Inject current-frame trajectory points as renderable particle spheres.
 
-    Only the current-frame positions are rendered as 3D spheres. Trail lines
-    are drawn as 2D overlays in save_camera_frames() instead.
+    If the render context already contains scene particles (e.g. MPM sand),
+    the trajectory dots are appended to the existing arrays so both the
+    scene particles and trajectory markers are rendered together.
 
     Args:
         sensor: SensorTiledCamera instance.
@@ -185,16 +186,32 @@ def inject_trajectory_particles(sensor, trajectory_positions, frame_idx, trail_l
 
     num_points = trajectory_positions.shape[0]
 
-    # Only inject current-frame positions as spheres
-    current_positions = trajectory_positions[:, frame_idx, :].astype(np.float32)
-    radii = np.full(num_points, 0.008, dtype=np.float32)
-    # Use global world (-1) so particles are visible from any world tile
-    world_idx = np.full(num_points, -1, dtype=np.int32)
+    # Trajectory dots
+    traj_positions = trajectory_positions[:, frame_idx, :].astype(np.float32)
+    traj_radii = np.full(num_points, 0.008, dtype=np.float32)
+    traj_world = np.full(num_points, -1, dtype=np.int32)
 
-    device = sensor.render_context.device
-    sensor.render_context.particles_position = wp.array(current_positions, dtype=wp.vec3f, device=device)
-    sensor.render_context.particles_radius = wp.array(radii, dtype=wp.float32, device=device)
-    sensor.render_context.particles_world_index = wp.array(world_idx, dtype=wp.int32, device=device)
+    rc = sensor.render_context
+    device = rc.device
+
+    # If the scene already has particles (MPM sand, cloth, etc.),
+    # concatenate them with trajectory dots so both are rendered.
+    if rc.has_particles and rc.particles_position is not None and rc.particles_position.shape[0] > 0:
+        scene_pos = rc.particles_position.numpy()
+        scene_rad = rc.particles_radius.numpy()
+        scene_world = rc.particles_world_index.numpy()
+
+        all_pos = np.concatenate([scene_pos, traj_positions], axis=0)
+        all_rad = np.concatenate([scene_rad, traj_radii], axis=0)
+        all_world = np.concatenate([scene_world, traj_world], axis=0)
+    else:
+        all_pos = traj_positions
+        all_rad = traj_radii
+        all_world = traj_world
+
+    rc.particles_position = wp.array(all_pos, dtype=wp.vec3f, device=device)
+    rc.particles_radius = wp.array(all_rad, dtype=wp.float32, device=device)
+    rc.particles_world_index = wp.array(all_world, dtype=wp.int32, device=device)
 
 
 def _generate_trajectory_colors(num_points, seed=42):
@@ -1077,12 +1094,15 @@ def run_renderer(
             example.step()
         current_state = getattr(example, state_attr, state)
 
-        # Clear injected particles before update_from_state so that
-        # has_particles returns False (avoids crash when state.particle_q
-        # is None for rigid-body-only scenes). Also clear BVH bounds arrays
-        # since particle count changes each frame as the trail grows.
+        # Clear particle BVH arrays so they get rebuilt with current data.
+        # For rigid-body-only scenes (no actual particles), also clear the
+        # position array so has_particles returns False and update_from_state
+        # doesn't try to assign a None state.particle_q.
+        # For MPM/particle scenes, keep the position so update_from_state
+        # propagates the current state.particle_q to the render context.
         rc = sensor.render_context
-        rc._RenderContext__particles_position = None
+        if model.particle_count == 0:
+            rc._RenderContext__particles_position = None
         rc.bvh_particles = None
         rc.bvh_particles_lowers = None
         rc.bvh_particles_uppers = None
