@@ -20,7 +20,7 @@ from dataclasses import dataclass
 import numpy as np
 import warp as wp
 
-from ..geometry import ShapeFlags
+from ..geometry import GeoType, ShapeFlags
 from ..sim import Model, State
 from .warp_raytrace import ClearData, RenderContext, RenderLightType, RenderOrder, RenderShapeType
 
@@ -189,6 +189,8 @@ class SensorTiledCamera:
 
         self.render_context.utils.compute_mesh_bounds()
 
+        self._assign_model_appearance()
+
         if options is not None:
             self.render_context.options.enable_backface_culling = options.backface_culling
             if options.checkerboard_texture:
@@ -227,6 +229,142 @@ class SensorTiledCamera:
 
         if self.render_context.has_particles:
             self.render_context.particles_position = state.particle_q
+
+    def _assign_model_appearance(self):
+        """Populate shape colors, materials, and textures from the model's shape sources.
+
+        Reads ``model.shape_source`` to extract per-shape colors (from mesh
+        materials or a default palette) and, for mesh shapes with UV coordinates
+        and texture images, uploads texture data to the render context.
+        """
+        from ..utils.texture import load_texture  # noqa: PLC0415
+
+        # Paul Tol Bright 9-color palette (same as ViewerBase._shape_color_map)
+        palette = [
+            [68, 119, 170],
+            [102, 204, 238],
+            [34, 136, 51],
+            [204, 187, 68],
+            [238, 102, 119],
+            [170, 51, 119],
+            [187, 187, 187],
+            [238, 153, 51],
+            [0, 153, 136],
+        ]
+
+        num_shapes = self.model.shape_count
+        shape_types = self.model.shape_type.numpy()
+        shape_sources = self.model.shape_source
+        mesh_geo_types = {int(GeoType.MESH), int(GeoType.CONVEX_MESH)}
+
+        colors = np.ones((num_shapes, 4), dtype=np.float32)
+        shape_materials = np.full(num_shapes, -1, dtype=np.int32)
+
+        # Texture / material accumulators
+        texture_cache = {}  # id(geo_src) → texture_index
+        texture_pixels_list = []  # list of packed uint32 flat arrays
+        texture_widths = []
+        texture_heights = []
+        texture_offsets = []  # pixel offset into concatenated texture_data
+        pixel_offset = 0
+
+        material_list = []  # (rgba_vec4, texture_idx) per material
+
+        texcoord_arrays = []  # list of UV arrays to concatenate
+        texcoord_offsets = np.zeros(num_shapes, dtype=np.int32)
+        uv_offset = 0
+
+        for s in range(num_shapes):
+            geo_type = int(shape_types[s])
+            geo_src = shape_sources[s] if s < len(shape_sources) else None
+
+            # --- Shape color ---
+            if geo_type == int(GeoType.PLANE):
+                colors[s] = [0.125, 0.125, 0.15, 1.0]
+            elif geo_type in mesh_geo_types and geo_src is not None and getattr(geo_src, "color", None) is not None:
+                c = geo_src.color
+                colors[s] = [c[0], c[1], c[2], 1.0]
+            else:
+                c = palette[s % len(palette)]
+                colors[s] = [c[0] / 255.0, c[1] / 255.0, c[2] / 255.0, 1.0]
+
+            # --- Textures (mesh types only) ---
+            if geo_type not in mesh_geo_types or geo_src is None:
+                continue
+
+            uvs = getattr(geo_src, "_uvs", None)
+            tex_input = getattr(geo_src, "texture", None)
+            if uvs is None or tex_input is None:
+                continue
+
+            # Load and deduplicate texture image
+            mesh_id = id(geo_src)
+            if mesh_id not in texture_cache:
+                img = load_texture(tex_input)
+                if img is None:
+                    continue
+                if img.ndim == 2:
+                    img = np.stack([img, img, img, np.full_like(img, 255)], axis=-1)
+                elif img.shape[-1] == 3:
+                    img = np.concatenate([img, np.full((*img.shape[:2], 1), 255, dtype=img.dtype)], axis=-1)
+
+                img = img.astype(np.uint8)
+                r = img[:, :, 0].astype(np.uint32)
+                g = img[:, :, 1].astype(np.uint32)
+                b = img[:, :, 2].astype(np.uint32)
+                packed = (r << 16) | (g << 8) | b
+                packed_flat = packed.flatten()
+
+                tex_idx = len(texture_widths)
+                texture_cache[mesh_id] = tex_idx
+                texture_pixels_list.append(packed_flat)
+                texture_widths.append(img.shape[1])
+                texture_heights.append(img.shape[0])
+                texture_offsets.append(pixel_offset)
+                pixel_offset += packed_flat.shape[0]
+
+            tex_idx = texture_cache[mesh_id]
+
+            # Create a material for this shape
+            mat_idx = len(material_list)
+            material_list.append((np.array([1.0, 1.0, 1.0, 1.0], dtype=np.float32), tex_idx))
+            shape_materials[s] = mat_idx
+
+            # Store UV offset for this mesh
+            texcoord_offsets[s] = uv_offset
+            texcoord_arrays.append(np.array(uvs, dtype=np.float32).reshape(-1, 2))
+            uv_offset += uvs.shape[0]
+
+        # --- Upload to render context ---
+        rc = self.render_context
+        device = rc.device
+
+        rc.shape_colors = wp.array(colors, dtype=wp.vec4f, device=device)
+        rc.shape_materials = wp.array(shape_materials, dtype=wp.int32, device=device)
+
+        if material_list:
+            rc.options.enable_textures = True
+
+            # Textures
+            all_pixels = np.concatenate(texture_pixels_list)
+            rc.texture_data = wp.array(all_pixels, dtype=wp.uint32, device=device)
+            rc.texture_offsets = wp.array(texture_offsets, dtype=wp.int32, device=device)
+            rc.texture_width = wp.array(texture_widths, dtype=wp.int32, device=device)
+            rc.texture_height = wp.array(texture_heights, dtype=wp.int32, device=device)
+
+            # Materials
+            mat_rgba = np.array([m[0] for m in material_list], dtype=np.float32)
+            mat_tex_ids = np.array([m[1] for m in material_list], dtype=np.int32)
+            mat_repeat = np.ones((len(material_list), 2), dtype=np.float32)
+            rc.material_rgba = wp.array(mat_rgba, dtype=wp.vec4f, device=device)
+            rc.material_texture_ids = wp.array(mat_tex_ids, dtype=wp.int32, device=device)
+            rc.material_texture_repeat = wp.array(mat_repeat, dtype=wp.vec2f, device=device)
+
+            # UVs
+            if texcoord_arrays:
+                all_uvs = np.concatenate(texcoord_arrays)
+                rc.mesh_texcoord = wp.array(all_uvs, dtype=wp.vec2f, device=device)
+            rc.mesh_texcoord_offsets = wp.array(texcoord_offsets, dtype=wp.int32, device=device)
 
     def render(
         self,

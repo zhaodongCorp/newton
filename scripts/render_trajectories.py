@@ -403,72 +403,6 @@ def save_camera_frames(
         img.save(filepath, quality=95)
 
 
-def _assign_viewer_colors(sensor, model):
-    """Assign shape colors matching ViewerGL's appearance.
-
-    For mesh shapes with a color attribute (from MJCF/URDF materials),
-    uses the model's original color.  For other shapes, cycles through
-    the Paul Tol Bright palette.  Ground planes get dark gray.
-
-    TODO: populate RenderContext texture arrays and material properties
-    (roughness, metallic) from Mesh objects to match ViewerGL appearance
-    more closely.  The warp raytracer's render_megakernel already supports
-    2D texture sampling and per-shape materials but they are not wired up
-    here.  Full PBR (Cook-Torrance BRDF, normal maps, env maps) would also
-    require changes to the raytracer kernel itself.
-    """
-    import numpy as np  # noqa: PLC0415
-    import warp as wp  # noqa: PLC0415
-
-    import newton  # noqa: PLC0415
-
-    # Paul Tol Bright 9-color palette (same as ViewerGL._shape_color_map)
-    palette = [
-        [68, 119, 170],  # blue
-        [102, 204, 238],  # cyan
-        [34, 136, 51],  # green
-        [204, 187, 68],  # yellow
-        [238, 102, 119],  # red
-        [170, 51, 119],  # magenta
-        [187, 187, 187],  # grey
-        [238, 153, 51],  # orange
-        [0, 153, 136],  # teal
-    ]
-
-    num_shapes = model.shape_count
-    geo_types = model.shape_type.numpy()
-    shape_sources = model.shape_source  # Python list of Mesh/SDF objects indexed by shape
-    colors = np.ones((num_shapes, 4), dtype=np.float32)
-
-    # Both MESH and CONVEX_MESH can carry material colors from MJCF/URDF
-    mesh_types = {int(newton.GeoType.MESH)}
-    if hasattr(newton.GeoType, "CONVEX_MESH"):
-        mesh_types.add(int(newton.GeoType.CONVEX_MESH))
-
-    for s in range(num_shapes):
-        geo_type = int(geo_types[s])
-        if geo_type == int(newton.GeoType.PLANE):
-            # Ground plane: dark gray (matches ViewerGL)
-            colors[s] = [0.125, 0.125, 0.15, 1.0]
-        elif geo_type in mesh_types and s < len(shape_sources):
-            # Mesh shapes: use the geometry source's color if available
-            geo_src = shape_sources[s]
-            if geo_src is not None and getattr(geo_src, "color", None) is not None:
-                c = geo_src.color
-                colors[s] = [c[0], c[1], c[2], 1.0]
-            else:
-                c = palette[s % len(palette)]
-                colors[s] = [c[0] / 255.0, c[1] / 255.0, c[2] / 255.0, 1.0]
-        else:
-            c = palette[s % len(palette)]
-            colors[s] = [c[0] / 255.0, c[1] / 255.0, c[2] / 255.0, 1.0]
-
-    sensor.render_context.shape_colors = wp.array(
-        colors,
-        dtype=wp.vec4f,
-        device=sensor.render_context.device,
-    )
-
 
 def _apply_example_shape_colors(sensor, model, example):
     """Apply custom shape colors defined by the example.
@@ -1041,9 +975,6 @@ def run_renderer(
         # alone doesn't propagate.
         model.shape_world = global_world
         sensor.render_context.shape_world_index = global_world
-
-    # Assign shape colors to match ViewerGL appearance (Paul Tol Bright palette)
-    _assign_viewer_colors(sensor, model)
 
     # Apply any custom shape colors defined by the example (e.g. cube colors
     # set via viewer.update_shape_colors() which ViewerNull discards).
