@@ -45,7 +45,7 @@ def discover_examples():
     import newton.examples  # noqa: PLC0415
 
     src_dir = newton.examples.get_source_directory()
-    modules = ["basic", "cable", "cloth", "contacts", "diffsim", "ik", "mpm", "robot", "selection", "sensors"]
+    modules = ["basic", "cable", "cloth", "contacts", "diffsim", "ik", "mpm", "multiphysics", "robot", "selection", "sensors", "softbody"]
     example_map = {}
     for module in sorted(modules):
         module_dir = os.path.join(src_dir, module)
