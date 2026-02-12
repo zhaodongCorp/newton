@@ -142,6 +142,8 @@ def render_megakernel(
     # Triangle Mesh:
     triangle_mesh_id: wp.uint64,
     triangle_mesh_color: wp.vec4f,
+    # Particles color:
+    particles_color: wp.vec4f,
     # Materials
     material_texture_ids: wp.array(dtype=wp.int32),
     material_texture_repeat: wp.array(dtype=wp.vec2f),
@@ -247,6 +249,8 @@ def render_megakernel(
             color = wp.cw_mul(color, material_rgba[shape_materials[closest_hit.shape_index]])
     elif closest_hit.shape_index == ray_cast.TRIANGLE_MESH_SHAPE_ID:
         color = triangle_mesh_color
+    elif closest_hit.shape_index == ray_cast.PARTICLES_SHAPE_ID:
+        color = particles_color
 
     base_color = wp.vec3f(color[0], color[1], color[2])
     out_color = wp.vec3f(0.0)

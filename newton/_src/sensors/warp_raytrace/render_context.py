@@ -78,6 +78,7 @@ class RenderContext:
         self.__triangle_points: wp.array(dtype=wp.vec3f) = None
         self.__triangle_indices: wp.array(dtype=wp.int32) = None
         self.triangle_mesh_color: tuple = (1.0, 1.0, 1.0, 1.0)
+        self.particles_color: tuple = (0.7, 0.6, 0.4, 1.0)
 
         self.__particles_position: wp.array(dtype=wp.vec3f) = None
         self.__particles_radius: wp.array(dtype=wp.float32) = None
@@ -329,6 +330,8 @@ class RenderContext:
                     # Triangle Mesh
                     self.triangle_mesh.id if self.triangle_mesh is not None else 0,
                     wp.vec4f(*self.triangle_mesh_color),
+                    # Particles color
+                    wp.vec4f(*self.particles_color),
                     # Textures
                     self.material_texture_ids,
                     self.material_texture_repeat,
