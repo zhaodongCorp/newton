@@ -116,8 +116,10 @@ def concatenate_videos(video_paths, output_path, crf):
     # Use ffmpeg concat demuxer via a temp file list
     with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
         for path in video_paths:
-            # ffmpeg concat format requires escaping single quotes
-            escaped = path.replace("'", "'\\''")
+            # Use absolute paths so ffmpeg resolves them regardless of
+            # where the temp list file is located.
+            abs_path = os.path.abspath(path)
+            escaped = abs_path.replace("'", "'\\''")
             f.write(f"file '{escaped}'\n")
         list_path = f.name
 
