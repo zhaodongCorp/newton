@@ -329,6 +329,9 @@ class SensorTiledCamera:
             mat_idx = len(material_list)
             material_list.append((np.array([1.0, 1.0, 1.0, 1.0], dtype=np.float32), tex_idx))
             shape_materials[s] = mat_idx
+            # Use white base so the texture is rendered at true color
+            # (the render kernel multiplies base_color × tex_color).
+            colors[s] = [1.0, 1.0, 1.0, 1.0]
 
             # Store UV offset for this mesh
             texcoord_offsets[s] = uv_offset
