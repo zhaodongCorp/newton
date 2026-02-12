@@ -1159,7 +1159,15 @@ def run_renderer(
         )
         visibility_all[:, :, frame] = vis
 
-        # Inject trajectory particles as renderable spheres
+        # Inject trajectory particles as renderable spheres.
+        # Clear the particle BVH first: the depth pass built it for N scene
+        # particles, but after injection the count is N + num_trajectory_dots.
+        # Without clearing, refit_bvh would access out-of-bounds indices.
+        rc.bvh_particles = None
+        rc.bvh_particles_lowers = None
+        rc.bvh_particles_uppers = None
+        rc.bvh_particles_groups = None
+        rc.bvh_particles_group_roots = None
         inject_trajectory_particles(sensor, vis_positions, frame_idx=frame)
 
         # Inflate thin shape dimensions for the color render so that
