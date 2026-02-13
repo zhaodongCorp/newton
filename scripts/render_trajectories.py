@@ -168,7 +168,7 @@ def create_axis_cameras(center, radius, num_worlds=1, distance_multiplier=1.5):
     return wp.array(transforms, dtype=wp.transformf)
 
 
-def inject_trajectory_particles(sensor, trajectory_positions, frame_idx, trail_length=20):
+def inject_trajectory_particles(sensor, trajectory_positions, frame_idx, point_radius=0.004):
     """Inject current-frame trajectory points as renderable particle spheres.
 
     If the render context already contains scene particles (e.g. MPM sand),
@@ -179,7 +179,7 @@ def inject_trajectory_particles(sensor, trajectory_positions, frame_idx, trail_l
         sensor: SensorTiledCamera instance.
         trajectory_positions: numpy array of shape (num_points, num_frames, 3).
         frame_idx: Current frame index into trajectory_positions.
-        trail_length: Unused, kept for API compatibility.
+        point_radius: Radius of each trajectory sphere (default: 0.004).
     """
     import numpy as np  # noqa: PLC0415
     import warp as wp  # noqa: PLC0415
@@ -188,7 +188,7 @@ def inject_trajectory_particles(sensor, trajectory_positions, frame_idx, trail_l
 
     # Trajectory dots
     traj_positions = trajectory_positions[:, frame_idx, :].astype(np.float32)
-    traj_radii = np.full(num_points, 0.008, dtype=np.float32)
+    traj_radii = np.full(num_points, point_radius, dtype=np.float32)
     traj_world = np.full(num_points, -1, dtype=np.int32)
 
     rc = sensor.render_context
@@ -791,6 +791,7 @@ def run_renderer(
     name_prefix=None,
     min_pixels=1.0,
     spp=1,
+    point_radius=0.004,
 ):
     """Load example, run simulation with rendering, save JPG frames."""
     import importlib  # noqa: PLC0415
@@ -1094,7 +1095,7 @@ def run_renderer(
         rc.bvh_particles_uppers = None
         rc.bvh_particles_groups = None
         rc.bvh_particles_group_roots = None
-        inject_trajectory_particles(sensor, vis_positions, frame_idx=frame)
+        inject_trajectory_particles(sensor, vis_positions, frame_idx=frame, point_radius=point_radius)
 
         # Inflate thin shape dimensions for the color render so that
         # sub-pixel geometry (e.g. thin rails) is visible from all angles.
@@ -1230,6 +1231,12 @@ def main():
         default=1,
         help="Samples per pixel for anti-aliasing: 1, 4, 9, or 16 (default: 1)",
     )
+    parser.add_argument(
+        "--point-radius",
+        type=float,
+        default=0.004,
+        help="Radius of each trajectory point sphere (default: 0.004)",
+    )
 
     # Common example-specific args with defaults matching what examples expect
     # when not explicitly provided.  This avoids AttributeError from examples
@@ -1280,6 +1287,7 @@ def main():
         name_prefix=args.name_prefix,
         min_pixels=args.min_pixels,
         spp=args.spp,
+        point_radius=args.point_radius,
     )
 
 
