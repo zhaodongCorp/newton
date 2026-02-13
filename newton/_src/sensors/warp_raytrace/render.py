@@ -16,7 +16,7 @@
 import warp as wp
 
 from . import lighting, ray_cast, textures
-from .types import RenderOrder
+from .types import RenderOrder, RenderShapeType
 
 
 @wp.func
@@ -132,6 +132,9 @@ def render_megakernel(
     mesh_face_vertices: wp.array(dtype=wp.vec3i),
     mesh_texcoord: wp.array(dtype=wp.vec2f),
     mesh_texcoord_offsets: wp.array(dtype=wp.int32),
+    # Mesh vertex normals
+    mesh_vertex_normals: wp.array(dtype=wp.vec3f),
+    mesh_vertex_normal_offsets: wp.array(dtype=wp.int32),
     # Particle BVH
     bvh_particles_size: wp.int32,
     bvh_particles_id: wp.uint64,
@@ -227,11 +230,36 @@ def render_megakernel(
     if closest_hit.shape_index == ray_cast.NO_HIT_SHAPE_ID:
         return
 
+    # Smooth vertex normal interpolation for mesh shapes
+    shading_normal = closest_hit.normal
+    if closest_hit.shape_index < ray_cast.MAX_SHAPE_ID:
+        if shape_types[closest_hit.shape_index] == RenderShapeType.MESH:
+            mesh_id = closest_hit.shape_mesh_index
+            f = closest_hit.face_idx
+            if (
+                mesh_id >= 0
+                and f >= 0
+                and mesh_vertex_normal_offsets.shape[0] > 0
+                and mesh_vertex_normals.shape[0] > 0
+            ):
+                normal_base = mesh_vertex_normal_offsets[mesh_id]
+                if mesh_vertex_normals.shape[0] > normal_base:
+                    # Winding convention matches textures: (f*3+2, f*3+0, f*3+1)
+                    v_idx = wp.vec3i(f * 3 + 2, f * 3 + 0, f * 3 + 1)
+                    n0 = mesh_vertex_normals[normal_base + v_idx[0]]
+                    n1 = mesh_vertex_normals[normal_base + v_idx[1]]
+                    n2 = mesh_vertex_normals[normal_base + v_idx[2]]
+                    bw = 1.0 - closest_hit.bary_u - closest_hit.bary_v
+                    smooth_n = n0 * bw + n1 * closest_hit.bary_u + n2 * closest_hit.bary_v
+                    len_sn = wp.length(smooth_n)
+                    if len_sn > 0.0:
+                        shading_normal = wp.normalize(smooth_n)
+
     if render_depth:
         out_depth[out_index] = closest_hit.distance
 
     if render_normal:
-        out_normal[out_index] = closest_hit.normal
+        out_normal[out_index] = shading_normal
 
     if render_shape_index:
         out_shape_index[out_index] = closest_hit.shape_index
@@ -295,8 +323,8 @@ def render_megakernel(
 
     if enable_ambient_lighting:
         up = wp.vec3f(0.0, 0.0, 1.0)
-        len_n = wp.length(closest_hit.normal)
-        n = closest_hit.normal if len_n > 0.0 else up
+        len_n = wp.length(shading_normal)
+        n = shading_normal if len_n > 0.0 else up
         n = wp.normalize(n)
         hemispheric = 0.5 * (wp.dot(n, up) + 1.0)
         sky = wp.vec3f(0.4, 0.4, 0.45)
@@ -310,8 +338,9 @@ def render_megakernel(
         )
 
     # Apply lighting and shadows
+    view_dir = -ray_dir_world
     for light_index in range(num_lights):
-        light_contribution = lighting.compute_lighting(
+        light_contrib = lighting.compute_lighting(
             enable_shadows,
             enable_particles,
             enable_backface_culling,
@@ -337,10 +366,11 @@ def render_megakernel(
             particles_position,
             particles_radius,
             triangle_mesh_id,
-            closest_hit.normal,
+            shading_normal,
             hit_point,
+            view_dir,
         )
-        out_color = out_color + base_color * light_contribution
+        out_color = out_color + base_color * light_contrib[0] + wp.vec3f(light_contrib[1])
 
     out_color = wp.min(wp.max(out_color, wp.vec3f(0.0)), wp.vec3f(1.0))
     out_pixels[out_index] = pack_rgba_to_uint32(out_color, 1.0)

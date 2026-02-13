@@ -48,8 +48,9 @@ def compute_lighting(
     triangle_mesh_id: wp.uint64,
     normal: wp.vec3f,
     hit_point: wp.vec3f,
-) -> wp.float32:
-    light_contribution = wp.float32(0.0)
+    view_dir: wp.vec3f,
+) -> wp.vec2f:
+    light_contribution = wp.vec2f(0.0)
 
     if not light_active:
         return light_contribution
@@ -119,4 +120,14 @@ def compute_lighting(
         if shadow_hit:
             visible = shadow_min_visibility
 
-    return ndotl * attenuation * visible
+    diffuse = ndotl * attenuation * visible
+
+    # Blinn-Phong specular
+    shininess = 64.0
+    H = wp.normalize(L + view_dir)
+    NdotH = wp.max(0.0, wp.dot(normal, H))
+    spec = wp.pow(NdotH, shininess)
+    normalization = (shininess + 2.0) / (8.0 * 3.14159265)
+    specular = spec * normalization * attenuation * visible
+
+    return wp.vec2f(diffuse, specular)

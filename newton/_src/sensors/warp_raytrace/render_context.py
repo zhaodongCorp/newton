@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 
 import warp as wp
@@ -26,7 +27,7 @@ from .bvh import (
 )
 from .render import render_megakernel
 from .types import RenderOrder
-from .utils import Utils
+from .utils import Utils, apply_gamma_uint32_image, downsample_uint32_image
 
 
 @dataclass
@@ -50,9 +51,11 @@ class RenderContext:
         enable_ambient_lighting: bool = True
         enable_particles: bool = True
         enable_backface_culling: bool = True
+        enable_gamma: bool = True
         render_order: int = RenderOrder.PIXEL_PRIORITY
         tile_width: int = 16
         tile_height: int = 8
+        spp: int = 1
         max_distance: float = 1000.0
 
     def __init__(self, num_worlds: int = 1, options: Options | None = None, device: str | None = None):
@@ -74,6 +77,10 @@ class RenderContext:
         self.mesh_face_offsets: wp.array(dtype=wp.int32) = None
         self.mesh_face_vertices: wp.array(dtype=wp.vec3i) = None
         self.mesh_ids: wp.array(dtype=wp.uint64) = None
+        self.mesh_vertex_normals: wp.array(dtype=wp.vec3f) = None
+        self.mesh_vertex_normal_offsets: wp.array(dtype=wp.int32) = None
+
+        self.camera_fovs: wp.array(dtype=wp.float32) = None
 
         self.__triangle_points: wp.array(dtype=wp.vec3f) = None
         self.__triangle_indices: wp.array(dtype=wp.int32) = None
@@ -263,103 +270,261 @@ class RenderContext:
                 if clear_data is not None and clear_data.clear_albedo is not None:
                     albedo_image.fill_(wp.uint32(clear_data.clear_albedo))
 
+            spp = self.options.spp
+            use_supersampling = spp > 1 and self.camera_fovs is not None
+
+            if use_supersampling:
+                scale = int(math.isqrt(spp))
+                hi_w = width * scale
+                hi_h = height * scale
+
+                hi_camera_rays = self.utils.compute_pinhole_camera_rays(hi_w, hi_h, self.camera_fovs)
+
+                render_rays = hi_camera_rays
+                render_width = hi_w
+                render_height = hi_h
+            else:
+                render_rays = camera_rays
+                render_width = width
+                render_height = height
+
             if self.options.render_order == RenderOrder.TILED:
-                assert width % self.options.tile_width == 0, "render width must be a multiple of tile_width"
-                assert height % self.options.tile_height == 0, "render height must be a multiple of tile_height"
+                assert render_width % self.options.tile_width == 0, "render width must be a multiple of tile_width"
+                assert render_height % self.options.tile_height == 0, "render height must be a multiple of tile_height"
 
-            # Reshaping output images to one dimension, slightly improves performance in the Kernel.
-            if color_image is not None:
-                color_image = color_image.reshape(self.num_worlds * num_cameras * width * height)
-            if depth_image is not None:
-                depth_image = depth_image.reshape(self.num_worlds * num_cameras * width * height)
-            if shape_index_image is not None:
-                shape_index_image = shape_index_image.reshape(self.num_worlds * num_cameras * width * height)
-            if normal_image is not None:
-                normal_image = normal_image.reshape(self.num_worlds * num_cameras * width * height)
-            if albedo_image is not None:
-                albedo_image = albedo_image.reshape(self.num_worlds * num_cameras * width * height)
+            if use_supersampling:
+                hi_total = self.num_worlds * num_cameras * render_width * render_height
 
-            wp.launch(
-                kernel=render_megakernel,
-                dim=(self.num_worlds * num_cameras * width * height),
-                inputs=[
-                    # Model and Options
-                    self.num_worlds,
-                    num_cameras,
-                    self.num_lights,
-                    width,
-                    height,
-                    self.options.render_order,
-                    self.options.tile_width,
-                    self.options.tile_height,
-                    self.options.enable_shadows,
-                    self.options.enable_textures,
-                    self.options.enable_ambient_lighting,
-                    self.options.enable_particles and self.has_particles,
-                    self.options.enable_backface_culling,
-                    self.options.enable_global_world,
-                    self.options.max_distance,
-                    # Camera
-                    camera_rays,
-                    camera_transforms,
-                    # Shape BVH
-                    self.num_shapes_enabled,
-                    self.bvh_shapes.id if self.bvh_shapes else 0,
-                    self.bvh_shapes_group_roots,
-                    # Shapes
-                    self.shape_enabled,
-                    self.shape_types,
-                    self.shape_mesh_indices,
-                    self.shape_materials,
-                    self.shape_sizes,
-                    self.shape_colors,
-                    self.shape_transforms,
-                    # Meshes
-                    self.mesh_ids,
-                    self.mesh_face_offsets,
-                    self.mesh_face_vertices,
-                    self.mesh_texcoord,
-                    self.mesh_texcoord_offsets,
-                    # Particle BVH
-                    self.num_particles_total,
-                    self.bvh_particles.id if self.bvh_particles else 0,
-                    self.bvh_particles_group_roots,
-                    # Particles
-                    self.particles_position,
-                    self.particles_radius,
-                    # Triangle Mesh
-                    self.triangle_mesh.id if self.triangle_mesh is not None else 0,
-                    wp.vec4f(*self.triangle_mesh_color),
-                    # Particles color
-                    wp.vec4f(*self.particles_color),
-                    # Textures
-                    self.material_texture_ids,
-                    self.material_texture_repeat,
-                    self.material_rgba,
-                    self.texture_offsets,
-                    self.texture_data,
-                    self.texture_height,
-                    self.texture_width,
-                    # Lights
-                    self.lights_active,
-                    self.lights_type,
-                    self.lights_cast_shadow,
-                    self.lights_position,
-                    self.lights_orientation,
-                    # Outputs
-                    color_image is not None,
-                    depth_image is not None,
-                    shape_index_image is not None,
-                    normal_image is not None,
-                    albedo_image is not None,
-                    color_image,
-                    depth_image,
-                    shape_index_image,
-                    normal_image,
-                    albedo_image,
-                ],
-                device=self.device,
-            )
+                # Allocate hi-res temp buffers for uint32 outputs only
+                hi_color = wp.zeros(hi_total, dtype=wp.uint32, device=self.device) if color_image is not None else None
+                hi_albedo = (
+                    wp.zeros(hi_total, dtype=wp.uint32, device=self.device) if albedo_image is not None else None
+                )
+
+                # Non-uint32 outputs render at original resolution (no downsample)
+                lo_depth = depth_image
+                lo_shape_index = shape_index_image
+                lo_normal = normal_image
+
+                if lo_depth is not None:
+                    lo_depth = lo_depth.reshape(self.num_worlds * num_cameras * width * height)
+                if lo_shape_index is not None:
+                    lo_shape_index = lo_shape_index.reshape(self.num_worlds * num_cameras * width * height)
+                if lo_normal is not None:
+                    lo_normal = lo_normal.reshape(self.num_worlds * num_cameras * width * height)
+
+                wp.launch(
+                    kernel=render_megakernel,
+                    dim=hi_total,
+                    inputs=self.__megakernel_args(
+                        render_width,
+                        render_height,
+                        num_cameras,
+                        render_rays,
+                        camera_transforms,
+                        color_image=hi_color,
+                        depth_image=None,
+                        shape_index_image=None,
+                        normal_image=None,
+                        albedo_image=hi_albedo,
+                    ),
+                    device=self.device,
+                )
+
+                # Render non-color outputs at original resolution
+                if lo_depth is not None or lo_shape_index is not None or lo_normal is not None:
+                    lo_total = self.num_worlds * num_cameras * width * height
+                    wp.launch(
+                        kernel=render_megakernel,
+                        dim=lo_total,
+                        inputs=self.__megakernel_args(
+                            width,
+                            height,
+                            num_cameras,
+                            camera_rays,
+                            camera_transforms,
+                            color_image=None,
+                            depth_image=lo_depth,
+                            shape_index_image=lo_shape_index,
+                            normal_image=lo_normal,
+                            albedo_image=None,
+                        ),
+                        device=self.device,
+                    )
+
+                # Downsample hi-res to user output
+                lo_total = self.num_worlds * num_cameras * width * height
+                if color_image is not None:
+                    color_flat = color_image.reshape(lo_total)
+                    wp.launch(
+                        downsample_uint32_image,
+                        dim=lo_total,
+                        inputs=[
+                            hi_color,
+                            color_flat,
+                            render_width,
+                            width,
+                            height,
+                            scale,
+                            num_cameras,
+                            self.num_worlds,
+                            self.options.enable_gamma,
+                        ],
+                        device=self.device,
+                    )
+                if albedo_image is not None:
+                    albedo_flat = albedo_image.reshape(lo_total)
+                    wp.launch(
+                        downsample_uint32_image,
+                        dim=lo_total,
+                        inputs=[
+                            hi_albedo,
+                            albedo_flat,
+                            render_width,
+                            width,
+                            height,
+                            scale,
+                            num_cameras,
+                            self.num_worlds,
+                            self.options.enable_gamma,
+                        ],
+                        device=self.device,
+                    )
+            else:
+                # Standard (non-supersampled) path
+                if color_image is not None:
+                    color_image = color_image.reshape(self.num_worlds * num_cameras * width * height)
+                if depth_image is not None:
+                    depth_image = depth_image.reshape(self.num_worlds * num_cameras * width * height)
+                if shape_index_image is not None:
+                    shape_index_image = shape_index_image.reshape(self.num_worlds * num_cameras * width * height)
+                if normal_image is not None:
+                    normal_image = normal_image.reshape(self.num_worlds * num_cameras * width * height)
+                if albedo_image is not None:
+                    albedo_image = albedo_image.reshape(self.num_worlds * num_cameras * width * height)
+
+                wp.launch(
+                    kernel=render_megakernel,
+                    dim=(self.num_worlds * num_cameras * width * height),
+                    inputs=self.__megakernel_args(
+                        width,
+                        height,
+                        num_cameras,
+                        camera_rays,
+                        camera_transforms,
+                        color_image=color_image,
+                        depth_image=depth_image,
+                        shape_index_image=shape_index_image,
+                        normal_image=normal_image,
+                        albedo_image=albedo_image,
+                    ),
+                    device=self.device,
+                )
+
+                # Apply sRGB gamma correction as post-process (when not supersampling)
+                if self.options.enable_gamma:
+                    total_pixels = self.num_worlds * num_cameras * width * height
+                    if color_image is not None:
+                        wp.launch(
+                            apply_gamma_uint32_image, dim=total_pixels, inputs=[color_image], device=self.device
+                        )
+                    if albedo_image is not None:
+                        wp.launch(
+                            apply_gamma_uint32_image, dim=total_pixels, inputs=[albedo_image], device=self.device
+                        )
+
+    def __megakernel_args(
+        self,
+        width,
+        height,
+        num_cameras,
+        camera_rays,
+        camera_transforms,
+        color_image,
+        depth_image,
+        shape_index_image,
+        normal_image,
+        albedo_image,
+    ):
+        return [
+            # Model and Options
+            self.num_worlds,
+            num_cameras,
+            self.num_lights,
+            width,
+            height,
+            self.options.render_order,
+            self.options.tile_width,
+            self.options.tile_height,
+            self.options.enable_shadows,
+            self.options.enable_textures,
+            self.options.enable_ambient_lighting,
+            self.options.enable_particles and self.has_particles,
+            self.options.enable_backface_culling,
+            self.options.enable_global_world,
+            self.options.max_distance,
+            # Camera
+            camera_rays,
+            camera_transforms,
+            # Shape BVH
+            self.num_shapes_enabled,
+            self.bvh_shapes.id if self.bvh_shapes else 0,
+            self.bvh_shapes_group_roots,
+            # Shapes
+            self.shape_enabled,
+            self.shape_types,
+            self.shape_mesh_indices,
+            self.shape_materials,
+            self.shape_sizes,
+            self.shape_colors,
+            self.shape_transforms,
+            # Meshes
+            self.mesh_ids,
+            self.mesh_face_offsets,
+            self.mesh_face_vertices,
+            self.mesh_texcoord,
+            self.mesh_texcoord_offsets,
+            # Mesh vertex normals
+            self.mesh_vertex_normals,
+            self.mesh_vertex_normal_offsets,
+            # Particle BVH
+            self.num_particles_total,
+            self.bvh_particles.id if self.bvh_particles else 0,
+            self.bvh_particles_group_roots,
+            # Particles
+            self.particles_position,
+            self.particles_radius,
+            # Triangle Mesh
+            self.triangle_mesh.id if self.triangle_mesh is not None else 0,
+            wp.vec4f(*self.triangle_mesh_color),
+            # Particles color
+            wp.vec4f(*self.particles_color),
+            # Textures
+            self.material_texture_ids,
+            self.material_texture_repeat,
+            self.material_rgba,
+            self.texture_offsets,
+            self.texture_data,
+            self.texture_height,
+            self.texture_width,
+            # Lights
+            self.lights_active,
+            self.lights_type,
+            self.lights_cast_shadow,
+            self.lights_position,
+            self.lights_orientation,
+            # Outputs
+            color_image is not None,
+            depth_image is not None,
+            shape_index_image is not None,
+            normal_image is not None,
+            albedo_image is not None,
+            color_image,
+            depth_image,
+            shape_index_image,
+            normal_image,
+            albedo_image,
+        ]
 
     def __compute_bvh_shape_bounds(self):
         wp.launch(

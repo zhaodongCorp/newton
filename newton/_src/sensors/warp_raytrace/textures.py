@@ -19,17 +19,32 @@ from .types import RenderShapeType
 
 
 @wp.func
+def unpack_texel(packed: wp.uint32) -> wp.vec3f:
+    r = wp.float32((packed >> wp.uint32(16)) & wp.uint32(0xFF)) / 255.0
+    g = wp.float32((packed >> wp.uint32(8)) & wp.uint32(0xFF)) / 255.0
+    b = wp.float32(packed & wp.uint32(0xFF)) / 255.0
+    return wp.vec3f(r, g, b)
+
+
+@wp.func
 def sample_texture_2d(
     uv: wp.vec2f, width: wp.int32, height: wp.int32, texture_offsets: wp.int32, texture_data: wp.array(dtype=wp.uint32)
 ) -> wp.vec3f:
-    ix = wp.min(width - 1, wp.int32(uv[0] * wp.float32(width)))
-    it = wp.min(height - 1, wp.int32(uv[1] * wp.float32(height)))
-    linear_idx = texture_offsets + (it * width + ix)
-    packed_rgba = texture_data[linear_idx]
-    r = wp.float32((packed_rgba >> wp.uint32(16)) & wp.uint32(0xFF)) / 255.0
-    g = wp.float32((packed_rgba >> wp.uint32(8)) & wp.uint32(0xFF)) / 255.0
-    b = wp.float32(packed_rgba & wp.uint32(0xFF)) / 255.0
-    return wp.vec3f(r, g, b)
+    fx = uv[0] * wp.float32(width) - 0.5
+    fy = uv[1] * wp.float32(height) - 0.5
+    ix0 = wp.max(0, wp.int32(wp.floor(fx)))
+    iy0 = wp.max(0, wp.int32(wp.floor(fy)))
+    ix1 = wp.min(width - 1, ix0 + 1)
+    iy1 = wp.min(height - 1, iy0 + 1)
+    sx = wp.max(0.0, fx - wp.float32(ix0))
+    sy = wp.max(0.0, fy - wp.float32(iy0))
+    c00 = unpack_texel(texture_data[texture_offsets + iy0 * width + ix0])
+    c10 = unpack_texel(texture_data[texture_offsets + iy0 * width + ix1])
+    c01 = unpack_texel(texture_data[texture_offsets + iy1 * width + ix0])
+    c11 = unpack_texel(texture_data[texture_offsets + iy1 * width + ix1])
+    top = c00 * (1.0 - sx) + c10 * sx
+    bot = c01 * (1.0 - sx) + c11 * sx
+    return top * (1.0 - sy) + bot * sy
 
 
 @wp.func

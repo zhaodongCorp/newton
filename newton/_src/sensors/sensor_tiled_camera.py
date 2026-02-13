@@ -345,6 +345,56 @@ class SensorTiledCamera:
         rc.shape_colors = wp.array(colors, dtype=wp.vec4f, device=device)
         rc.shape_materials = wp.array(shape_materials, dtype=wp.int32, device=device)
 
+        # --- Compute per-vertex normals for mesh shapes ---
+        vertex_normal_arrays = []
+        vertex_normal_offsets = np.zeros(num_shapes, dtype=np.int32)
+        vn_offset = 0
+
+        for s in range(num_shapes):
+            geo_type = int(shape_types[s])
+            geo_src = shape_sources[s] if s < len(shape_sources) else None
+
+            if geo_type not in mesh_geo_types or geo_src is None:
+                continue
+
+            vertices = getattr(geo_src, "vertices", None)
+            indices = getattr(geo_src, "indices", None)
+            if vertices is None or indices is None:
+                continue
+
+            verts = np.asarray(vertices, dtype=np.float32).reshape(-1, 3)
+            faces = np.asarray(indices, dtype=np.int32).reshape(-1, 3)
+
+            # Compute area-weighted vertex normals
+            per_vertex_normals = np.zeros_like(verts)
+            v0 = verts[faces[:, 0]]
+            v1 = verts[faces[:, 1]]
+            v2 = verts[faces[:, 2]]
+            face_normals = np.cross(v1 - v0, v2 - v0)
+            # Accumulate face normals at each vertex (area-weighted by magnitude of cross product)
+            for k in range(3):
+                np.add.at(per_vertex_normals, faces[:, k], face_normals)
+            # Normalize
+            norms = np.linalg.norm(per_vertex_normals, axis=1, keepdims=True)
+            norms = np.where(norms > 0, norms, 1.0)
+            per_vertex_normals = per_vertex_normals / norms
+
+            # Store as flat per-face-vertex array matching the winding convention (f*3+2, f*3+0, f*3+1)
+            num_faces = faces.shape[0]
+            flat_normals = np.empty((num_faces * 3, 3), dtype=np.float32)
+            flat_normals[0::3] = per_vertex_normals[faces[:, 2]]  # slot 0 = v2
+            flat_normals[1::3] = per_vertex_normals[faces[:, 0]]  # slot 1 = v0
+            flat_normals[2::3] = per_vertex_normals[faces[:, 1]]  # slot 2 = v1
+
+            vertex_normal_offsets[s] = vn_offset
+            vertex_normal_arrays.append(flat_normals)
+            vn_offset += num_faces * 3
+
+        if vertex_normal_arrays:
+            all_normals = np.concatenate(vertex_normal_arrays)
+            rc.mesh_vertex_normals = wp.array(all_normals, dtype=wp.vec3f, device=device)
+        rc.mesh_vertex_normal_offsets = wp.array(vertex_normal_offsets, dtype=wp.int32, device=device)
+
         if material_list:
             rc.options.enable_textures = True
 

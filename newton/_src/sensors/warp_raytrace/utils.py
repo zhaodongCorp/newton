@@ -124,6 +124,82 @@ def find_depth_range(depth_image: wp.array(dtype=wp.float32, ndim=4), depth_rang
 
 
 @wp.kernel(enable_backward=False)
+def apply_gamma_uint32_image(image: wp.array(dtype=wp.uint32)):
+    tid = wp.tid()
+    packed = image[tid]
+    a = (packed >> wp.uint32(24)) & wp.uint32(0xFF)
+    b_val = wp.float32((packed >> wp.uint32(16)) & wp.uint32(0xFF)) / 255.0
+    g_val = wp.float32((packed >> wp.uint32(8)) & wp.uint32(0xFF)) / 255.0
+    r_val = wp.float32(packed & wp.uint32(0xFF)) / 255.0
+    r_val = wp.pow(r_val, 1.0 / 2.2)
+    g_val = wp.pow(g_val, 1.0 / 2.2)
+    b_val = wp.pow(b_val, 1.0 / 2.2)
+    image[tid] = (
+        (a << wp.uint32(24))
+        | (wp.uint32(b_val * 255.0) << wp.uint32(16))
+        | (wp.uint32(g_val * 255.0) << wp.uint32(8))
+        | wp.uint32(r_val * 255.0)
+    )
+
+
+@wp.kernel(enable_backward=False)
+def downsample_uint32_image(
+    hi_res: wp.array(dtype=wp.uint32),
+    out_image: wp.array(dtype=wp.uint32),
+    hi_width: wp.int32,
+    lo_width: wp.int32,
+    lo_height: wp.int32,
+    scale: wp.int32,
+    num_cameras: wp.int32,
+    num_worlds: wp.int32,
+    enable_gamma: wp.bool,
+):
+    tid = wp.tid()
+    lo_pixels_per_view = lo_width * lo_height
+    lo_total_per_view = num_cameras * lo_pixels_per_view
+    world_idx = tid // lo_total_per_view
+    remainder = tid % lo_total_per_view
+    cam_idx = remainder // lo_pixels_per_view
+    pixel_idx = remainder % lo_pixels_per_view
+    lo_y = pixel_idx // lo_width
+    lo_x = pixel_idx % lo_width
+
+    hi_height = lo_height * scale
+    hi_pixels_per_view = hi_width * hi_height
+    hi_base = world_idx * num_cameras * hi_pixels_per_view + cam_idx * hi_pixels_per_view
+
+    r_sum = wp.float32(0.0)
+    g_sum = wp.float32(0.0)
+    b_sum = wp.float32(0.0)
+    count = wp.float32(scale * scale)
+
+    for dy in range(scale):
+        for dx in range(scale):
+            hy = lo_y * scale + dy
+            hx = lo_x * scale + dx
+            packed = hi_res[hi_base + hy * hi_width + hx]
+            b_sum = b_sum + wp.float32((packed >> wp.uint32(16)) & wp.uint32(0xFF)) / 255.0
+            g_sum = g_sum + wp.float32((packed >> wp.uint32(8)) & wp.uint32(0xFF)) / 255.0
+            r_sum = r_sum + wp.float32(packed & wp.uint32(0xFF)) / 255.0
+
+    r_avg = r_sum / count
+    g_avg = g_sum / count
+    b_avg = b_sum / count
+
+    if enable_gamma:
+        r_avg = wp.pow(r_avg, 1.0 / 2.2)
+        g_avg = wp.pow(g_avg, 1.0 / 2.2)
+        b_avg = wp.pow(b_avg, 1.0 / 2.2)
+
+    out_image[tid] = (
+        (wp.uint32(255) << wp.uint32(24))
+        | (wp.uint32(b_avg * 255.0) << wp.uint32(16))
+        | (wp.uint32(g_avg * 255.0) << wp.uint32(8))
+        | wp.uint32(r_avg * 255.0)
+    )
+
+
+@wp.kernel(enable_backward=False)
 def flatten_depth_image(
     depth_image: wp.array(dtype=wp.float32, ndim=4),
     buffer: wp.array(dtype=wp.uint8, ndim=3),
@@ -171,6 +247,9 @@ class Utils:
         dtype=wp.vec3f, ndim=4
     ):
         num_cameras = camera_fovs.size
+
+        # Store FOVs on the render context for supersampling reuse
+        self.__render_context.camera_fovs = camera_fovs
 
         camera_rays = wp.empty((num_cameras, height, width, 2), dtype=wp.vec3f, device=self.__render_context.device)
 
