@@ -98,6 +98,8 @@ class RenderContext:
         self.shape_transforms: wp.array(dtype=wp.transformf) = None
         self.shape_materials: wp.array(dtype=wp.int32) = None
         self.shape_colors: wp.array(dtype=wp.vec4f) = None
+        self.shape_roughness: wp.array(dtype=wp.float32) = None
+        self.shape_metallic: wp.array(dtype=wp.float32) = None
         self.shape_world_index: wp.array(dtype=wp.int32) = None
 
         self.texture_offsets: wp.array(dtype=wp.int32) = None
@@ -425,13 +427,9 @@ class RenderContext:
                 if self.options.enable_gamma:
                     total_pixels = self.num_worlds * num_cameras * width * height
                     if color_image is not None:
-                        wp.launch(
-                            apply_gamma_uint32_image, dim=total_pixels, inputs=[color_image], device=self.device
-                        )
+                        wp.launch(apply_gamma_uint32_image, dim=total_pixels, inputs=[color_image], device=self.device)
                     if albedo_image is not None:
-                        wp.launch(
-                            apply_gamma_uint32_image, dim=total_pixels, inputs=[albedo_image], device=self.device
-                        )
+                        wp.launch(apply_gamma_uint32_image, dim=total_pixels, inputs=[albedo_image], device=self.device)
 
     def __megakernel_args(
         self,
@@ -477,6 +475,8 @@ class RenderContext:
             self.shape_materials,
             self.shape_sizes,
             self.shape_colors,
+            self.shape_roughness,
+            self.shape_metallic,
             self.shape_transforms,
             # Meshes
             self.mesh_ids,

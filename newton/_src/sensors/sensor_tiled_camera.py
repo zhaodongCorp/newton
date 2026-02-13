@@ -258,6 +258,8 @@ class SensorTiledCamera:
         mesh_geo_types = {int(GeoType.MESH), int(GeoType.CONVEX_MESH)}
 
         colors = np.ones((num_shapes, 4), dtype=np.float32)
+        roughness_values = np.full(num_shapes, 0.5, dtype=np.float32)
+        metallic_values = np.full(num_shapes, 0.0, dtype=np.float32)
         shape_materials = np.full(num_shapes, -1, dtype=np.int32)
 
         # Texture / material accumulators
@@ -287,6 +289,13 @@ class SensorTiledCamera:
             else:
                 c = palette[s % len(palette)]
                 colors[s] = [c[0] / 255.0, c[1] / 255.0, c[2] / 255.0, 1.0]
+
+            # --- Roughness / metallic (mesh types with geo_src) ---
+            if geo_type in mesh_geo_types and geo_src is not None:
+                if getattr(geo_src, "roughness", None) is not None:
+                    roughness_values[s] = float(geo_src.roughness)
+                if getattr(geo_src, "metallic", None) is not None:
+                    metallic_values[s] = float(geo_src.metallic)
 
             # --- Textures (mesh types only) ---
             if geo_type not in mesh_geo_types or geo_src is None:
@@ -343,6 +352,8 @@ class SensorTiledCamera:
         device = rc.device
 
         rc.shape_colors = wp.array(colors, dtype=wp.vec4f, device=device)
+        rc.shape_roughness = wp.array(roughness_values, dtype=wp.float32, device=device)
+        rc.shape_metallic = wp.array(metallic_values, dtype=wp.float32, device=device)
         rc.shape_materials = wp.array(shape_materials, dtype=wp.int32, device=device)
 
         # --- Compute per-vertex normals for mesh shapes ---

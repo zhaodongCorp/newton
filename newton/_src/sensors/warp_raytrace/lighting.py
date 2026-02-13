@@ -49,6 +49,7 @@ def compute_lighting(
     normal: wp.vec3f,
     hit_point: wp.vec3f,
     view_dir: wp.vec3f,
+    shininess: wp.float32,
 ) -> wp.vec2f:
     light_contribution = wp.vec2f(0.0)
 
@@ -122,13 +123,11 @@ def compute_lighting(
 
     diffuse = ndotl * attenuation * visible
 
-    # Blinn-Phong specular with dielectric Fresnel reflectance (F0 = 0.04)
-    shininess = 64.0
-    f0 = 0.04
+    # Blinn-Phong specular (caller applies F0)
     H = wp.normalize(L + view_dir)
     NdotH = wp.max(0.0, wp.dot(normal, H))
     spec = wp.pow(NdotH, shininess)
     normalization = (shininess + 2.0) / (8.0 * 3.14159265)
-    specular = f0 * spec * normalization * attenuation * visible
+    specular = spec * normalization * attenuation * visible
 
     return wp.vec2f(diffuse, specular)

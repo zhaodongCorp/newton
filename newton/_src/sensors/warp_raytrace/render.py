@@ -125,6 +125,8 @@ def render_megakernel(
     shape_materials: wp.array(dtype=wp.int32),
     shape_sizes: wp.array(dtype=wp.vec3f),
     shape_colors: wp.array(dtype=wp.vec4f),
+    shape_roughness: wp.array(dtype=wp.float32),
+    shape_metallic: wp.array(dtype=wp.float32),
     shape_transforms: wp.array(dtype=wp.transformf),
     # Meshes
     mesh_ids: wp.array(dtype=wp.uint64),
@@ -236,12 +238,7 @@ def render_megakernel(
         if shape_types[closest_hit.shape_index] == RenderShapeType.MESH:
             mesh_id = closest_hit.shape_mesh_index
             f = closest_hit.face_idx
-            if (
-                mesh_id >= 0
-                and f >= 0
-                and mesh_vertex_normal_offsets.shape[0] > 0
-                and mesh_vertex_normals.shape[0] > 0
-            ):
+            if mesh_id >= 0 and f >= 0 and mesh_vertex_normal_offsets.shape[0] > 0 and mesh_vertex_normals.shape[0] > 0:
                 normal_base = mesh_vertex_normal_offsets[mesh_id]
                 if mesh_vertex_normals.shape[0] > normal_base:
                     # Winding convention matches textures: (f*3+2, f*3+0, f*3+1)
@@ -321,6 +318,24 @@ def render_megakernel(
     if not render_color:
         return
 
+    # Derive PBR material parameters from per-shape roughness/metallic
+    roughness = wp.float32(0.5)
+    metallic = wp.float32(0.0)
+    if closest_hit.shape_index < ray_cast.MAX_SHAPE_ID:
+        roughness = wp.clamp(shape_roughness[closest_hit.shape_index], 0.0, 1.0)
+        metallic = wp.clamp(shape_metallic[closest_hit.shape_index], 0.0, 1.0)
+
+    # Shininess from roughness (matching GL shader)
+    gloss = 1.0 - roughness
+    shininess = 1.0 + wp.pow(gloss, 4.0) * 1023.0
+
+    # F0: dielectrics=0.04, metals=albedo (vec3 for metal tinting)
+    f0 = wp.vec3f(
+        0.04 * (1.0 - metallic) + base_color[0] * metallic,
+        0.04 * (1.0 - metallic) + base_color[1] * metallic,
+        0.04 * (1.0 - metallic) + base_color[2] * metallic,
+    )
+
     if enable_ambient_lighting:
         up = wp.vec3f(0.0, 0.0, 1.0)
         len_n = wp.length(shading_normal)
@@ -331,10 +346,11 @@ def render_megakernel(
         ground = wp.vec3f(0.1, 0.1, 0.12)
         ambient_color = sky * hemispheric + ground * (1.0 - hemispheric)
         ambient_intensity = 0.5
+        metal_ambient_boost = 1.0 + 0.25 * metallic * (1.0 - 0.5 * roughness)
         out_color = wp.vec3f(
-            base_color[0] * (ambient_color[0] * ambient_intensity),
-            base_color[1] * (ambient_color[1] * ambient_intensity),
-            base_color[2] * (ambient_color[2] * ambient_intensity),
+            base_color[0] * (ambient_color[0] * ambient_intensity) * metal_ambient_boost,
+            base_color[1] * (ambient_color[1] * ambient_intensity) * metal_ambient_boost,
+            base_color[2] * (ambient_color[2] * ambient_intensity) * metal_ambient_boost,
         )
 
     # Apply lighting and shadows
@@ -369,8 +385,14 @@ def render_megakernel(
             shading_normal,
             hit_point,
             view_dir,
+            shininess,
         )
-        out_color = out_color + base_color * light_contrib[0] + wp.vec3f(light_contrib[1])
+        diffuse_contrib = light_contrib[0] * (1.0 - metallic)
+        out_color = wp.vec3f(
+            out_color[0] + base_color[0] * diffuse_contrib + f0[0] * light_contrib[1],
+            out_color[1] + base_color[1] * diffuse_contrib + f0[1] * light_contrib[1],
+            out_color[2] + base_color[2] * diffuse_contrib + f0[2] * light_contrib[1],
+        )
 
     out_color = wp.min(wp.max(out_color, wp.vec3f(0.0)), wp.vec3f(1.0))
     out_pixels[out_index] = pack_rgba_to_uint32(out_color, 1.0)
