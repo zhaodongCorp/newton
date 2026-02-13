@@ -333,7 +333,7 @@ def save_camera_frames(
         # Build vertical gradient with three stops using smoothstep interpolation:
         #   top = zenith blue, middle = pale horizon, bottom = ground color
         h = pixel_data.shape[0]
-        sky_zenith = np.array([100.0, 160.0, 230.0])
+        sky_zenith = np.array([70.0, 130.0, 210.0])
         sky_horizon = np.array([190.0, 210.0, 230.0])
         sky_ground = np.array([90.0, 85.0, 80.0])
         t = np.linspace(0.0, 1.0, h, dtype=np.float32)
@@ -355,14 +355,6 @@ def save_camera_frames(
         r = np.where(is_bg, grad_r, r)
         g = np.where(is_bg, grad_g, g)
         b = np.where(is_bg, grad_b, b)
-
-        # Brighten non-background pixels to compensate for the ray tracer's
-        # lower ambient intensity (0.5) compared to ViewerGL (~1.0).
-        brightness = 1.5
-        not_bg = ~is_bg
-        r = np.where(not_bg, np.minimum(r * brightness, 255.0), r)
-        g = np.where(not_bg, np.minimum(g * brightness, 255.0), g)
-        b = np.where(not_bg, np.minimum(b * brightness, 255.0), b)
 
         rgb = np.stack([r.astype(np.uint8), g.astype(np.uint8), b.astype(np.uint8)], axis=-1)
 
