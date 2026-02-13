@@ -790,6 +790,7 @@ def run_renderer(
     depth_tol=1e-4,
     name_prefix=None,
     min_pixels=1.0,
+    spp=1,
 ):
     """Load example, run simulation with rendering, save JPG frames."""
     import importlib  # noqa: PLC0415
@@ -935,6 +936,8 @@ def run_renderer(
             backface_culling=True,
         ),
     )
+
+    sensor.render_context.options.spp = spp
 
     # Create a directional light matching ViewerGL's sun direction.
     # ViewerGL sun_direction = (0.2, -0.3, 0.8) is the surface-to-light vector.
@@ -1221,6 +1224,12 @@ def main():
         default=1.0,
         help="Minimum shape thickness in pixels for the color render (default: 1.0)",
     )
+    parser.add_argument(
+        "--spp",
+        type=int,
+        default=1,
+        help="Samples per pixel for anti-aliasing: 1, 4, 9, or 16 (default: 1)",
+    )
 
     # Common example-specific args with defaults matching what examples expect
     # when not explicitly provided.  This avoids AttributeError from examples
@@ -1270,6 +1279,7 @@ def main():
         depth_tol=args.depth_tol,
         name_prefix=args.name_prefix,
         min_pixels=args.min_pixels,
+        spp=args.spp,
     )
 
 
