@@ -116,6 +116,13 @@ def main():
     parser.add_argument("--depth-tol", type=float, default=1e-4, help="Depth tolerance (fraction of radius)")
     parser.add_argument("--min-pixels", type=float, default=1.0, help="Minimum shape thickness in pixels")
     parser.add_argument("--spp", type=int, default=1, help="Samples per pixel for anti-aliasing (1, 4, 9, 16)")
+    parser.add_argument("--point-radius", type=float, default=0.004, help="Radius of each trajectory point sphere")
+    parser.add_argument(
+        "--no-trajectories",
+        action="store_true",
+        default=False,
+        help="Disable trajectory point spheres and trail lines (render scene only)",
+    )
 
     # Video params
     parser.add_argument("--fps", type=int, default=24, help="Video frames per second")
@@ -218,7 +225,11 @@ def main():
             str(args.min_pixels),
             "--spp",
             str(args.spp),
+            "--point-radius",
+            str(args.point_radius),
         ]
+        if args.no_trajectories:
+            render_cmd += ["--no-trajectories"]
         if args.device:
             render_cmd += ["--device", args.device]
         if args.num_worlds is not None:
