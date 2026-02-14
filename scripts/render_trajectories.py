@@ -359,35 +359,37 @@ def save_camera_frames(
         rgb = np.stack([r.astype(np.uint8), g.astype(np.uint8), b.astype(np.uint8)], axis=-1)
 
         img = Image.fromarray(rgb, mode="RGB")
-        draw = ImageDraw.Draw(img)
 
-        cam_xform = camera_transforms_np[cam_idx, 0]
-        cam_pos = cam_xform[:3]
-        cam_quat = cam_xform[3:]
+        if trajectory_positions is not None:
+            draw = ImageDraw.Draw(img)
 
-        # Draw trail lines for each trajectory point
-        num_points = trajectory_positions.shape[0]
-        for pt_idx in range(num_points):
-            trail_frames = list(range(start_frame, frame_idx + 1))
-            if len(trail_frames) < 2:
-                continue
-            trail_3d = trajectory_positions[pt_idx, trail_frames, :]
-            pixels, visible = _project_points_to_2d(
-                trail_3d,
-                cam_pos,
-                cam_quat,
-                fov_rad,
-                resolution,
-            )
-            # Draw connected line segments where both endpoints are visible
-            color = trail_colors[pt_idx]
-            for i in range(len(trail_frames) - 1):
-                if visible[i] and visible[i + 1]:
-                    x0, y0 = int(pixels[i, 0]), int(pixels[i, 1])
-                    x1, y1 = int(pixels[i + 1, 0]), int(pixels[i + 1, 1])
-                    # Clip to image bounds
-                    if 0 <= x0 < resolution and 0 <= y0 < resolution and 0 <= x1 < resolution and 0 <= y1 < resolution:
-                        draw.line([(x0, y0), (x1, y1)], fill=color, width=2)
+            cam_xform = camera_transforms_np[cam_idx, 0]
+            cam_pos = cam_xform[:3]
+            cam_quat = cam_xform[3:]
+
+            # Draw trail lines for each trajectory point
+            num_points = trajectory_positions.shape[0]
+            for pt_idx in range(num_points):
+                trail_frames = list(range(start_frame, frame_idx + 1))
+                if len(trail_frames) < 2:
+                    continue
+                trail_3d = trajectory_positions[pt_idx, trail_frames, :]
+                pixels, visible = _project_points_to_2d(
+                    trail_3d,
+                    cam_pos,
+                    cam_quat,
+                    fov_rad,
+                    resolution,
+                )
+                # Draw connected line segments where both endpoints are visible
+                color = trail_colors[pt_idx]
+                for i in range(len(trail_frames) - 1):
+                    if visible[i] and visible[i + 1]:
+                        x0, y0 = int(pixels[i, 0]), int(pixels[i, 1])
+                        x1, y1 = int(pixels[i + 1, 0]), int(pixels[i + 1, 1])
+                        # Clip to image bounds
+                        if 0 <= x0 < resolution and 0 <= y0 < resolution and 0 <= x1 < resolution and 0 <= y1 < resolution:
+                            draw.line([(x0, y0), (x1, y1)], fill=color, width=2)
 
         cam_dir = os.path.join(output_dir, f"{prefix}_cam_{cam_idx}")
         os.makedirs(cam_dir, exist_ok=True)
@@ -792,6 +794,7 @@ def run_renderer(
     min_pixels=1.0,
     spp=1,
     point_radius=0.004,
+    show_trajectories=True,
 ):
     """Load example, run simulation with rendering, save JPG frames."""
     import importlib  # noqa: PLC0415
@@ -1090,12 +1093,13 @@ def run_renderer(
         # Clear the particle BVH first: the depth pass built it for N scene
         # particles, but after injection the count is N + num_trajectory_dots.
         # Without clearing, refit_bvh would access out-of-bounds indices.
-        rc.bvh_particles = None
-        rc.bvh_particles_lowers = None
-        rc.bvh_particles_uppers = None
-        rc.bvh_particles_groups = None
-        rc.bvh_particles_group_roots = None
-        inject_trajectory_particles(sensor, vis_positions, frame_idx=frame, point_radius=point_radius)
+        if show_trajectories:
+            rc.bvh_particles = None
+            rc.bvh_particles_lowers = None
+            rc.bvh_particles_uppers = None
+            rc.bvh_particles_groups = None
+            rc.bvh_particles_group_roots = None
+            inject_trajectory_particles(sensor, vis_positions, frame_idx=frame, point_radius=point_radius)
 
         # Inflate thin shape dimensions for the color render so that
         # sub-pixel geometry (e.g. thin rails) is visible from all angles.
@@ -1127,13 +1131,13 @@ def run_renderer(
         # we free its GPU memory.
         wp.synchronize_device()
 
-        # Save frames with trail lines overlaid
+        # Save frames (with trail lines overlaid if trajectories enabled)
         save_camera_frames(
             color_image,
             output_dir,
             frame,
             num_cameras,
-            vis_positions,
+            vis_positions if show_trajectories else None,
             trail_colors,
             camera_transforms_np,
             fov_rad,
@@ -1237,6 +1241,12 @@ def main():
         default=0.004,
         help="Radius of each trajectory point sphere (default: 0.004)",
     )
+    parser.add_argument(
+        "--no-trajectories",
+        action="store_true",
+        default=False,
+        help="Disable trajectory point spheres and trail lines (render scene only)",
+    )
 
     # Common example-specific args with defaults matching what examples expect
     # when not explicitly provided.  This avoids AttributeError from examples
@@ -1288,6 +1298,7 @@ def main():
         min_pixels=args.min_pixels,
         spp=args.spp,
         point_radius=args.point_radius,
+        show_trajectories=not args.no_trajectories,
     )
 
 
