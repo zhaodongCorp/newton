@@ -8,7 +8,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <title>newton.usd.get_custom_attribute_values &#8212; Newton Physics</title>
+    <title>newton.usd.has_applied_api_schema &#8212; Newton Physics</title>
   
   
   
@@ -48,7 +48,7 @@
     <script src="../../_static/copybutton.js?v=f281be69"></script>
     <script src="../../_static/design-tabs.js?v=f930bc37"></script>
     <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
-    <script>DOCUMENTATION_OPTIONS.pagename = 'api/_generated/newton.usd.get_custom_attribute_values';</script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'api/_generated/newton.usd.has_applied_api_schema';</script>
     <script>
         DOCUMENTATION_OPTIONS.theme_version = '0.16.1';
         DOCUMENTATION_OPTIONS.theme_switcher_json_url = 'https://newton-physics.github.io/newton/switcher.json';
@@ -58,8 +58,8 @@
         </script>
     <link rel="index" title="Index" href="../../genindex.html" />
     <link rel="search" title="Search" href="../../search.html" />
-    <link rel="next" title="newton.usd.get_float" href="newton.usd.get_float.html" />
-    <link rel="prev" title="newton.usd.get_custom_attribute_declarations" href="newton.usd.get_custom_attribute_declarations.html" />
+    <link rel="next" title="newton.usd.has_attribute" href="newton.usd.has_attribute.html" />
+    <link rel="prev" title="newton.usd.get_transform" href="newton.usd.get_transform.html" />
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
   <meta name="docsearch:version" content="" />
@@ -787,7 +787,7 @@
     
     <li class="breadcrumb-item"><a href="../newton_usd.html" class="nav-link">newton.usd</a></li>
     
-    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">newton.usd.get_custom_attribute_values</span></li>
+    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">newton.usd.has_applied_api_schema</span></li>
   </ul>
 </nav>
 </div>
@@ -804,31 +804,30 @@
 <div id="searchbox"></div>
                 <article class="bd-article">
                   
-  <section id="newton-usd-get-custom-attribute-values">
-<h1>newton.usd.get_custom_attribute_values<a class="headerlink" href="#newton-usd-get-custom-attribute-values" title="Link to this heading">#</a></h1>
+  <section id="newton-usd-has-applied-api-schema">
+<h1>newton.usd.has_applied_api_schema<a class="headerlink" href="#newton-usd-has-applied-api-schema" title="Link to this heading">#</a></h1>
 <dl class="py function">
-<dt class="sig sig-object py" id="newton.usd.get_custom_attribute_values">
-<span class="sig-prename descclassname"><span class="pre">newton.usd.</span></span><span class="sig-name descname"><span class="pre">get_custom_attribute_values</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">prim</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">custom_attributes</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">context</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference external" href="https://github.com/newton-physics/newton/blob/main/newton/_src/usd/utils.py#L546"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#newton.usd.get_custom_attribute_values" title="Link to this definition">#</a></dt>
-<dd><p>Get custom attribute values from a USD prim and a set of known custom attributes.
-Returns a dictionary mapping from <code class="xref py py-attr docutils literal notranslate"><span class="pre">ModelBuilder.CustomAttribute.key</span></code> to the converted Warp value.
-The conversion is performed by <code class="xref py py-meth docutils literal notranslate"><span class="pre">ModelBuilder.CustomAttribute.usd_value_transformer()</span></code>.</p>
-<p>The context dictionary passed to the transformer function always contains:
-- <code class="docutils literal notranslate"><span class="pre">&quot;prim&quot;</span></code>: The USD prim to query.
-- <code class="docutils literal notranslate"><span class="pre">&quot;attr&quot;</span></code>: The <a class="reference internal" href="newton.ModelBuilder.html#newton.ModelBuilder.CustomAttribute" title="newton.ModelBuilder.CustomAttribute"><code class="xref py py-class docutils literal notranslate"><span class="pre">CustomAttribute</span></code></a> object to get the value for.
-It may additionally include caller-provided keys from the <code class="docutils literal notranslate"><span class="pre">context</span></code> argument.</p>
+<dt class="sig sig-object py" id="newton.usd.has_applied_api_schema">
+<span class="sig-prename descclassname"><span class="pre">newton.usd.</span></span><span class="sig-name descname"><span class="pre">has_applied_api_schema</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">prim</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">schema_name</span></span></em><span class="sig-paren">)</span><a class="reference external" href="https://github.com/newton-physics/newton/blob/main/newton/_src/usd/utils.py#L105"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#newton.usd.has_applied_api_schema" title="Link to this definition">#</a></dt>
+<dd><p>Check if a USD prim has an applied API schema, even if the schema is not
+registered with USD’s schema registry.</p>
+<p>For registered schemas (e.g. <code class="docutils literal notranslate"><span class="pre">UsdPhysics.RigidBodyAPI</span></code>), <code class="docutils literal notranslate"><span class="pre">prim.HasAPI()</span></code>
+is sufficient. However, non-core schemas that may be in draft state or not
+yet registered (e.g. MuJoCo-specific schemas like <code class="docutils literal notranslate"><span class="pre">MjcSiteAPI</span></code>) will not
+be found by <code class="docutils literal notranslate"><span class="pre">HasAPI()</span></code>. This helper falls back to inspecting the raw
+<code class="docutils literal notranslate"><span class="pre">apiSchemas</span></code> metadata on the prim.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
-<li><p><strong>prim</strong> (<em>Usd.Prim</em>) – The USD prim to query.</p></li>
-<li><p><strong>custom_attributes</strong> (<em>Sequence</em><em>[</em><a class="reference internal" href="newton.ModelBuilder.html#newton.ModelBuilder.CustomAttribute" title="newton.ModelBuilder.CustomAttribute"><em>ModelBuilder.CustomAttribute</em></a><em>]</em>) – The <a class="reference internal" href="newton.ModelBuilder.html#newton.ModelBuilder.CustomAttribute" title="newton.ModelBuilder.CustomAttribute"><code class="xref py py-class docutils literal notranslate"><span class="pre">CustomAttribute</span></code></a> objects to get values for.</p></li>
-<li><p><strong>context</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.14)"><em>dict</em></a><em>[</em><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a><em>, </em><em>Any</em><em>] </em><em>| </em><em>None</em>) – Optional extra context keys to forward to transformers.</p></li>
+<li><p><strong>prim</strong> (<em>Prim</em>) – The USD prim to query.</p></li>
+<li><p><strong>schema_name</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a>) – The API schema name to check for (e.g. <code class="docutils literal notranslate"><span class="pre">&quot;MjcSiteAPI&quot;</span></code>).</p></li>
 </ul>
 </dd>
 <dt class="field-even">Returns<span class="colon">:</span></dt>
-<dd class="field-even"><p>A dictionary of found custom attribute values mapping from attribute name to value.</p>
+<dd class="field-even"><p>True if the schema is applied to the prim, False otherwise.</p>
 </dd>
 <dt class="field-odd">Return type<span class="colon">:</span></dt>
-<dd class="field-odd"><p><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.14)">dict</a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)">str</a>, Any]</p>
+<dd class="field-odd"><p><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)">bool</a></p>
 </dd>
 </dl>
 </dd></dl>
@@ -858,7 +857,7 @@ It may additionally include caller-provided keys from the <code class="docutils 
   </div>
   <nav class="bd-toc-nav page-toc" aria-labelledby="pst-page-navigation-heading-2">
     <ul class="visible nav section-nav flex-column">
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#newton.usd.get_custom_attribute_values"><code class="docutils literal notranslate"><span class="pre">get_custom_attribute_values()</span></code></a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#newton.usd.has_applied_api_schema"><code class="docutils literal notranslate"><span class="pre">has_applied_api_schema()</span></code></a></li>
 </ul>
   </nav></div>
 
